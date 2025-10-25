@@ -1311,3 +1311,172 @@ module.exports = { app, server, io };userId);
 
       const room = rooms.get(socket.currentRoom);
       const isModerator = room?.moderators.has(socket.
+                                               // ملاحظة: هذا هو الجزء الأخير من ملف server.js
+// ضعه في نهاية الملف بعد جميع socket.on handlers
+
+  // إلغاء الكتم
+  socket.on('unmute-user', async (data) => {
+    try {
+      const admin = users.get(socket.userId);
+      if (!admin) return;
+
+      const muteInfo = mutedUsers.get(data.userId);
+      if (!muteInfo) {
+        return socket.emit('error', 'المستخدم غير مكتوم');
+      }
+
+      if (muteInfo.canOnlyBeRemovedBy === 'supreme' && !admin.isSupremeLeader) {
+        return socket.emit('error', '❌ فقط الزعيم يمكنه إلغاء هذا الكتم');
+      }
+
+      mutedUsers.delete(data.userId);
+      
+      const targetUser = users.get(data.userId);
+      socket.emit('action-success', `✅ تم إلغاء كتم ${targetUser?.displayName || 'المستخدم'}`);
+      
+      io.emit('user-unmuted', {
+        userId: data.userId,
+        username: targetUser?.displayName || 'المستخدم'
+      });
+      
+    } catch (error) {
+      console.error('خطأ في إلغاء الكتم:', error);
+    }
+  });
+
+  // إلغاء الحظر
+  socket.on('unban-user', async (data) => {
+    try {
+      const admin = users.get(socket.userId);
+      if (!admin || !admin.isSupremeLeader) {
+        return socket.emit('error', '❌ فقط الزعيم يمكنه إلغاء الحظر');
+      }
+
+      const banInfo = bannedUsers.get(data.userId);
+      if (!banInfo) {
+        return socket.emit('error', 'المستخدم غير محظور');
+      }
+
+      // إلغاء حظر الـ IP
+      if (banInfo.userIP) {
+        bannedIPs.delete(banInfo.userIP);
+      }
+
+      bannedUsers.delete(data.userId);
+      
+      const targetUser = users.get(data.userId);
+      socket.emit('action-success', `✅ تم إلغاء حظر ${targetUser?.displayName || 'المستخدم'}`);
+      console.log(`✅ إلغاء حظر ${targetUser?.username} بواسطة الزعيم`);
+      
+    } catch (error) {
+      console.error('خطأ في إلغاء الحظر:', error);
+    }
+  });
+
+  // باقي الـ handlers...
+  socket.on('get-rooms', () => updateRoomsList(socket));
+  socket.on('get-users', (data) => updateUsersList(data.roomId, socket));
+  
+  socket.on('disconnect', () => {
+    if (socket.userId) {
+      onlineUsers.delete(socket.userId);
+      
+      rooms.forEach(room => {
+        if (!room.isOfficial && room.users.has(socket.userId)) {
+          room.users.delete(socket.userId);
+        }
+      });
+    }
+    console.log('🔌 قطع اتصال:', socket.id);
+  });
+
+  socket.on('ping', () => {
+    if (socket.userId) {
+      onlineUsers.set(socket.userId, Date.now());
+    }
+  });
+});
+
+// دوال مساعدة
+function updateRoomsList(socket = null) {
+  const roomList = Array.from(rooms.values()).map(room => ({
+    id: room.id,
+    name: room.name,
+    description: room.description,
+    userCount: room.users.size,
+    hasPassword: room.hasPassword,
+    isOfficial: room.isOfficial,
+    createdBy: room.createdBy
+  }));
+
+  if (socket) {
+    socket.emit('rooms-list', roomList);
+  } else {
+    io.emit('rooms-list', roomList);
+  }
+}
+
+function updateUsersList(roomId, socket = null) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+
+  const userList = Array.from(room.users).map(userId => {
+    const user = users.get(userId);
+    if (!user) return null;
+
+    return {
+      id: userId,
+      username: user.username,
+      displayName: user.displayName || user.username,
+      avatar: user.customAvatar || user.avatar,
+      isOnline: onlineUsers.has(userId),
+      isSupremeLeader: user.isSupremeLeader || false,
+      isSuperAdmin: user.isSuperAdmin || false,
+      isAdmin: user.isAdmin || false,
+      isModerator: room.moderators.has(userId),
+      isVerified: user.isVerified || false,
+      specialBadges: user.specialBadges || []
+    };
+  }).filter(Boolean);
+
+  if (socket) {
+    socket.emit('users-list', userList);
+  } else {
+    io.to(roomId).emit('users-list', userList);
+  }
+}
+
+// معالجة الأخطاء
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught Exception:', error);
+});
+
+process.on('unhandledRejection', (error) => {
+  console.error('❌ Unhandled Rejection:', error);
+});
+
+// تشغيل الخادم
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`
+╔════════════════════════════════════════════════════════════════╗
+║                  ✅ الخادم يعمل بنجاح                         ║
+║  🔗 البورت: ${PORT.toString().padEnd(48)}║
+║  🌐 الرابط: http://localhost:${PORT.toString().padEnd(35)}║
+║  👑 نظام MOBO - الأقوى والأكثر تطوراً                        ║
+║  ⚡ جاهز لاستقبال الاتصالات                                  ║
+║  🛡️ محمي ضد الاختراق والنسخ                                 ║
+╚════════════════════════════════════════════════════════════════╝
+
+📊 إحصائيات التشغيل:
+   • المستخدمون: ${users.size}
+   • الغرف: ${rooms.size}
+   • الإعدادات: محملة ✅
+   • الحماية: مفعلة 🛡️
+
+⚠️  تذكير: هذا النظام محمي بحقوق الطبع والنشر
+   © 2025 MOBO - جميع الحقوق محفوظة للزعيم
+  `);
+});
+
+// لا تصدر أي شيء - هذا سيرفر مستقل
+// module.exports محذوف لتجنب الأخطاء
