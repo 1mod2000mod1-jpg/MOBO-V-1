@@ -211,7 +211,7 @@
                             <button class="tool-btn" onclick="showImageUpload()" title="رفع صورة">
                                 🖼️
                             </button>
-                            <button class="tool-btn" onclick="showEmojiPicker(🐱‍👤😈🔪✨🤺💉🍷🥤🤷‍♂️💧🩸)" title="إيموجي">
+                            <button class="tool-btn" onclick="showEmojiPicker()" title="إيموجي">
                                 😊
                             </button>
                             <input type="file" id="image-input" accept="image/*" 
@@ -219,8 +219,8 @@
                         </div>
                         <form id="message-form" class="message-form">
                             <textarea id="message-input" class="message-input" 
-                                    placeholder="اكتب رسالتك هنا... (300 حرف كحد أقصى)" 
-                                    maxlength="300" rows="1" disabled></textarea>
+                                    placeholder="اكتب رسالتك هنا... (500 حرف كحد أقصى)" 
+                                    maxlength="500" rows="1" disabled></textarea>
                             <button type="submit" class="modern-btn" disabled>
                                 إرسال 🚀
                             </button>
@@ -354,8 +354,8 @@
                             <div class="setting-item">
                                 <label>لون الموقع:</label>
                                 <select id="setting-color" class="modern-input" onchange="updateSystemSetting('siteColor', this.value)">
-                                    <option value="black">🔴 أحمر</option>
                                     <option value="black">⚫ أسود</option>
+                                    <option value="red">🔴 أحمر</option>
                                 </select>
                             </div>
                             <div class="setting-item">
@@ -374,7 +374,6 @@
                                 <input type="text" id="social-instagram" class="modern-input" placeholder="Instagram">
                                 <input type="text" id="social-youtube" class="modern-input" placeholder="YouTube">
                                 <input type="text" id="social-email" class="modern-input" placeholder="Email">
-                                <button class="modern-btn small" onclick="updateSocialLinks()">
                                     حفظ الروابط
                                 </button>
                             </div>
