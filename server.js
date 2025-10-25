@@ -694,11 +694,13 @@ io.on('connection', (socket) => {
       });
 
       // حظر الـ IP
-      bannedIPs.set(targetUser.registrationIP, {
-        userId: data.userId,
-        bannedAt: new Date(),
-        reason: reason
-      });
+      if (targetUser.registrationIP) {
+        bannedIPs.set(targetUser.registrationIP, {
+          userId: data.userId,
+          bannedAt: new Date(),
+          reason: reason
+        });
+      }
 
       // قطع اتصال المستخدم
       const targetSockets = Array.from(io.sockets.sockets.values())
@@ -1093,7 +1095,7 @@ io.on('connection', (socket) => {
       };
 
       io.emit('social-links-updated', systemSettings.socialLinks);
-      socket.emit('action-success', '');
+      socket.emit('action-success', '✅ تم تحديث روابط التواصل');
       
     } catch (error) {
       console.error('خطأ في تحديث الروابط:', error);
