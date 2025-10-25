@@ -14,7 +14,9 @@ let currentPrivateChat = null;
 // ═══════════════════ إنشاء الاتصال ═══════════════════
 function initializeSocket() {
     try {
-        socket = io({
+        // 🚨 تأكد من استخدام رابطك الحقيقي على Render
+        const RENDER_URL = "https://mobi-3eh0.onrender.com";
+        socket = io(RENDER_URL, {
             transports: ['websocket', 'polling'],
             reconnection: true,
             reconnectionDelay: 1000,
@@ -1481,14 +1483,10 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 
+// ...
 console.log(`
 ╔═══════════════════════════════════════════════════════╗
 ║     🚀 نظام MOBO العالمي - جاهز للعمل © 2025        ║
 ║              جميع الحقوق محفوظة للزعيم               ║
 ╚═══════════════════════════════════════════════════════╝
-`);// 🚀 نظام MOBO العالمي - النظام الأمامي الأقوى © 2025
-let socket = null;
-let currentUser = null;
-let currentRoom = null;
-let systemSettings = {};
-let selectedUserId = null;');
+`);
