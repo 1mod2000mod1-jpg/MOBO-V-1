@@ -1,11 +1,12 @@
 {
-  "name": "mobo-global-chat",
-  "version": "6.0.0",
-  "description": "موقع MOBO العالمي للدردشة - النظام المتكامل الأقوى © 2025",
+  "name": "mobo-global-chat-system",
+  "version": "7.0.0",
+  "description": "موقع MOBO العالمي للدردشة - النظام الأقوى والأجمل © 2025 - نظام دردشة عربي متطور بميزات خارقة",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "test": "echo \"النظام جاهز للاختبار\" && exit 0"
   },
   "engines": {
     "node": ">=14.0.0",
@@ -21,20 +22,41 @@
   "keywords": [
     "chat",
     "arabic",
-    "secure",
-    "mobo",
     "دردشة",
     "عربية",
-    "آمنة",
     "realtime",
     "websocket",
+    "socket.io",
+    "mobo",
+    "secure",
+    "advanced",
     "supreme",
-    "advanced"
+    "arabic-chat",
+    "real-time-chat",
+    "group-chat",
+    "private-messages",
+    "chat-rooms",
+    "moderation",
+    "admin-panel"
   ],
-  "author": "MOBO - الزعيم - المطور والمالك الأعلى",
-  "license": "COPYRIGHT © 2025 MOBO - جميع الحقوق محفوظة - يمنع النسخ",
+  "author": {
+    "name": "MOBO - الزعيم",
+    "email": "supreme@mobo.com",
+    "url": "https://mobo.chat"
+  },
+  "license": "PROPRIETARY",
+  "private": true,
   "repository": {
-    "type": "private",
+    "type": "git",
     "url": "private"
+  },
+  "bugs": {
+    "url": "https://mobo.chat/support",
+    "email": "support@mobo.com"
+  },
+  "homepage": "https://mobo.chat",
+  "copyright": "© 2025 MOBO - جميع الحقوق محفوظة للزعيم - يمنع النسخ",
+  "config": {
+    "port": "3000"
   }
 }
