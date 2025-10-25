@@ -14,7 +14,11 @@ let currentPrivateChat = null;
 // ═══════════════════ إنشاء الاتصال ═══════════════════
 function initializeSocket() {
     try {
-        socket = io({
+        // 1. تحديد رابط الخادم الفعلي
+        const RENDER_URL = "https://mobi-1.onrender.com"; // 🚨 ملاحظة: تم حذف الشرطة المائلة الأخيرة (/)
+
+        // 2. تمرير الرابط أولاً، ثم كائن الإعدادات
+        socket = io(RENDER_URL, { 
             transports: ['websocket', 'polling'],
             reconnection: true,
             reconnectionDelay: 1000,
