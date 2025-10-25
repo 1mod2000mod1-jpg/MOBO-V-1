@@ -4,6 +4,7 @@ const socketIo = require('socket.io');
 const path = require('path');
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
+const multer = require('multer');
 
 const app = express();
 const server = http.createServer(app);
@@ -14,17 +15,33 @@ const io = socketIo(server, {
   },
   pingTimeout: 60000,
   pingInterval: 25000,
-  transports: ['websocket', 'polling']
+  transports: ['websocket', 'polling'],
+  maxHttpBufferSize: 10e6
 });
 
 const PORT = process.env.PORT || 3000;
 
 console.log(`
-╔═══════════════════════════════════════════════════════╗
-║          🚀 موقع MOBO العالمي المتطور                ║
-║            © 2025 جميع الحقوق محفوظة                 ║
-╚═══════════════════════════════════════════════════════╝
+╔════════════════════════════════════════════════════════════════╗
+║          🚀 موقع MOBO العالمي - النظام الأقوى                ║
+║            © 2025 جميع الحقوق محفوظة للزعيم                  ║
+║         ⚠️ يمنع النسخ أو التقليد تحت طائلة القانون ⚠️        ║
+╚════════════════════════════════════════════════════════════════╝
 `);
+
+// إعدادات رفع الصور
+const storage = multer.memoryStorage();
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('الملف يجب أن يكون صورة'));
+    }
+  }
+});
 
 app.use(express.static(path.join(__dirname)));
 app.use(express.json({ limit: '10mb' }));
@@ -34,7 +51,12 @@ app.get('/', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', time: new Date() });
+  res.json({ 
+    status: 'ok', 
+    time: new Date(),
+    uptime: process.uptime(),
+    version: '7.0.0'
+  });
 });
 
 // قواعد البيانات
@@ -48,6 +70,9 @@ const onlineUsers = new Map();
 const privateMessages = new Map();
 const supportMessages = new Map();
 const uploadedImages = new Map();
+const accountDeletionRequests = new Map();
+const secretRooms = new Map();
+const userPermissions = new Map();
 
 // إعدادات النظام
 let systemSettings = {
@@ -58,60 +83,82 @@ let systemSettings = {
   siteTitle: 'موقع MOBO العالمي',
   maxImageSize: 10 * 1024 * 1024,
   currentImageSize: 0,
-  adminPassword: 'Mobo@2025',
+  adminPassword: 'Mobo@Supreme2025!@#',
   socialLinks: {
     telegram: '',
     instagram: '',
     youtube: '',
-    email: 'support@mobo.com'
-  }
+    email: 'supreme@mobo.com'
+  },
+  maxChatMessages: 100,
+  autoCleanImages: true,
+  imageRetentionTime: 300000, // 5 دقائق
+  privateImageRetentionTime: 60000 // دقيقة واحدة
 };
 
-// إنشاء حساب المدير
-const createSuperAdmin = () => {
-  const adminId = 'admin_mobo';
+// إنشاء حساب الزعيم الأعلى
+const createSupremeLeader = () => {
+  const supremeId = 'supreme_mobo_001';
   
-  const adminUser = {
-    id: adminId,
+  const supremeLeader = {
+    id: supremeId,
     username: 'MOBO',
-    displayName: '👑 الزعيم MOBO',
-    password: bcrypt.hashSync(systemSettings.adminPassword, 10),
+    displayName: '👑 الزعيم MOBO - المالك الأعلى',
+    password: bcrypt.hashSync(systemSettings.adminPassword, 12),
     isAdmin: true,
     isSuperAdmin: true,
     isSupremeLeader: true,
     isVerified: true,
     isProtected: true,
-    joinDate: new Date(),
-    lastActive: new Date(),
     cannotBeMuted: true,
     cannotBeBanned: true,
+    cannotBeKicked: true,
+    hasAllPermissions: true,
+    joinDate: new Date(),
+    lastActive: new Date(),
     avatar: '👑',
     customAvatar: null,
-    specialBadges: ['👑', '⭐', '💎']
+    customImage: null,
+    specialBadges: ['👑', '⭐', '💎', '🔱'],
+    glowingMessages: true,
+    nameChangeCount: 0,
+    maxNameChanges: Infinity,
+    canAccessAllRooms: true,
+    canDeleteAnyMessage: true,
+    canDeleteAnyRoom: true,
+    canAddModerators: true,
+    canRemoveModerators: true,
+    canChangeSystemSettings: true,
+    canSeeChatPasswords: true,
+    totalPower: Infinity
   };
 
-  users.set(adminId, adminUser);
-  userProfiles.set(adminId, {
-    userId: adminId,
+  users.set(supremeId, supremeLeader);
+  userProfiles.set(supremeId, {
+    userId: supremeId,
     gender: 'male',
     avatar: '👑',
-    status: '🔱 المطور والمالك الأعلى 🔱',
+    customImage: null,
+    status: '🔱 المطور والمالك الأعلى - لا يُقهر 🔱',
     country: 'global',
-    joinDate: new Date()
+    joinDate: new Date(),
+    specialStatus: 'SUPREME_LEADER'
   });
+  privateMessages.set(supremeId, new Map());
 
-  console.log(`✅ المدير جاهز: MOBO / ${systemSettings.adminPassword}`);
-  return adminUser;
+  console.log(`✅ الزعيم الأعلى جاهز: MOBO`);
+  console.log(`🔐 كلمة المرور: ${systemSettings.adminPassword}`);
+  return supremeLeader;
 };
 
-// إنشاء الغرفة العالمية
+// إنشاء الغرفة العالمية الرسمية
 const createGlobalRoom = () => {
   const globalRoom = {
-    id: 'global_official',
-    name: '🌍 الغرفة العالمية الرسمية',
-    description: 'الغرفة الرئيسية للجميع',
-    createdBy: 'MOBO',
-    creatorId: 'admin_mobo',
+    id: 'global_official_supreme',
+    name: '🌍 الغرفة العالمية الرسمية - MOBO',
+    description: 'الغرفة الرئيسية للجميع تحت إشراف الزعيم',
+    createdBy: 'الزعيم MOBO',
+    creatorId: 'supreme_mobo_001',
     createdAt: new Date(),
     users: new Set(),
     messages: [],
@@ -119,48 +166,79 @@ const createGlobalRoom = () => {
     isGlobal: true,
     isOfficial: true,
     cannotBeDeleted: true,
+    cannotLeave: true,
     hasPassword: false,
     password: null,
     moderators: new Set(),
-    isSilenced: false
+    isSilenced: false,
+    silencedBy: null,
+    maxMessages: 100,
+    autoClean: true
   };
 
   rooms.set(globalRoom.id, globalRoom);
-  console.log('✅ الغرفة العالمية جاهزة');
+  console.log('✅ الغرفة العالمية الرسمية جاهزة');
   return globalRoom;
 };
 
-createSuperAdmin();
+createSupremeLeader();
 createGlobalRoom();
 
-// تنظيف تلقائي
+// تنظيف تلقائي متقدم
 setInterval(() => {
   const now = Date.now();
   
+  // تنظيف المستخدمين غير النشطين
   for (const [userId, lastSeen] of onlineUsers.entries()) {
-    if (now - lastSeen > 300000) {
+    if (now - lastSeen > 300000) { // 5 دقائق
       onlineUsers.delete(userId);
     }
   }
   
+  // تنظيف الصور المنتهية
   for (const [imageId, imageData] of uploadedImages.entries()) {
     if (imageData.deleteAt && now > imageData.deleteAt) {
       systemSettings.currentImageSize -= imageData.size;
       uploadedImages.delete(imageId);
+      console.log(`🧹 تم حذف صورة منتهية: ${imageId}`);
     }
   }
   
+  // تنظيف الكتم المؤقت
   for (const [userId, muteData] of mutedUsers.entries()) {
     if (muteData.temporary && muteData.expires && now > muteData.expires) {
       mutedUsers.delete(userId);
+      console.log(`🔊 تم إلغاء كتم مؤقت: ${userId}`);
     }
   }
-}, 60000);
+  
+  // تنظيف الرسائل الزائدة
+  for (const [roomId, room] of rooms.entries()) {
+    if (room.messages.length > room.maxMessages) {
+      const removed = room.messages.length - room.maxMessages;
+      room.messages = room.messages.slice(-room.maxMessages);
+      console.log(`🧹 تنظيف ${removed} رسالة من ${room.name}`);
+    }
+  }
+  
+  // تنظيف الرسائل الخاصة القديمة
+  for (const [userId, conversations] of privateMessages.entries()) {
+    for (const [otherUserId, messages] of conversations.entries()) {
+      if (messages.length > 30) {
+        const removed = messages.length - 30;
+        conversations.set(otherUserId, messages.slice(-30));
+        console.log(`🧹 تنظيف ${removed} رسالة خاصة`);
+      }
+    }
+  }
+  
+}, 60000); // كل دقيقة
 
-// Socket.IO
+// Socket.IO - الاتصالات
 io.on('connection', (socket) => {
   console.log('🔗 اتصال جديد:', socket.id);
   socket.userIP = socket.handshake.address;
+  socket.connectedAt = Date.now();
 
   // تسجيل الدخول
   socket.on('login', async (data) => {
@@ -170,20 +248,25 @@ io.on('connection', (socket) => {
       const { username, password } = data;
       
       if (!username || !password) {
-        console.log('❌ بيانات ناقصة');
         return socket.emit('login-error', 'الرجاء إدخال جميع البيانات');
       }
 
+      // فحص الحظر بالـ IP
       if (bannedIPs.has(socket.userIP)) {
-        console.log('❌ IP محظور');
-        return socket.emit('login-error', 'تم حظر عنوان IP الخاص بك');
+        console.log('❌ IP محظور:', socket.userIP);
+        return socket.emit('banned-user', {
+          reason: 'تم حظر عنوان IP الخاص بك',
+          bannedBy: 'النظام',
+          canAppeal: true
+        });
       }
 
+      // البحث عن المستخدم
       let userFound = null;
       let userId = null;
 
       for (const [id, user] of users.entries()) {
-        if (user.username === username) {
+        if (user.username.toLowerCase() === username.toLowerCase()) {
           if (bcrypt.compareSync(password, user.password)) {
             userFound = user;
             userId = id;
@@ -197,63 +280,82 @@ io.on('connection', (socket) => {
         return socket.emit('login-error', 'اسم المستخدم أو كلمة المرور غير صحيحة');
       }
 
+      // فحص الحظر
       if (bannedUsers.has(userId)) {
         const banInfo = bannedUsers.get(userId);
-        console.log('❌ مستخدم محظور');
+        console.log('❌ مستخدم محظور:', username);
         return socket.emit('banned-user', {
           reason: banInfo.reason,
           bannedBy: banInfo.bannedBy,
+          bannedAt: banInfo.bannedAt,
           canAppeal: true
         });
       }
 
+      // تسجيل الدخول بنجاح
       socket.userId = userId;
       socket.userData = userFound;
       userFound.lastActive = new Date();
       onlineUsers.set(userId, Date.now());
 
-      const globalRoom = rooms.get('global_official');
+      // الانضمام للغرفة العالمية
+      const globalRoom = rooms.get('global_official_supreme');
       globalRoom.users.add(userId);
-      socket.join('global_official');
-      socket.currentRoom = 'global_official';
+      socket.join('global_official_supreme');
+      socket.currentRoom = 'global_official_supreme';
 
       console.log('✅ دخول ناجح:', username);
 
+      // إرسال البيانات
       socket.emit('login-success', {
         user: {
           id: userId,
           username: userFound.username,
           displayName: userFound.displayName || userFound.username,
-          avatar: userFound.avatar,
-          customAvatar: userFound.customAvatar,
-          isAdmin: userFound.isAdmin,
-          isSuperAdmin: userFound.isSuperAdmin,
-          isSupremeLeader: userFound.isSupremeLeader,
-          isVerified: userFound.isVerified,
-          specialBadges: userFound.specialBadges || []
+          avatar: userFound.customImage || userFound.customAvatar || userFound.avatar,
+          isAdmin: userFound.isAdmin || false,
+          isSuperAdmin: userFound.isSuperAdmin || false,
+          isSupremeLeader: userFound.isSupremeLeader || false,
+          isVerified: userFound.isVerified || false,
+          specialBadges: userFound.specialBadges || [],
+          glowingMessages: userFound.glowingMessages || false,
+          nameChangeCount: userFound.nameChangeCount || 0,
+          maxNameChanges: userFound.maxNameChanges || 0
         },
         permissions: {
-          canDeleteAnyMessage: userFound.isSupremeLeader,
-          canAddModerators: userFound.isSupremeLeader,
-          canChangeSystemSettings: userFound.isSupremeLeader
+          canDeleteAnyMessage: userFound.canDeleteAnyMessage || false,
+          canDeleteAnyRoom: userFound.canDeleteAnyRoom || false,
+          canAddModerators: userFound.canAddModerators || false,
+          canRemoveModerators: userFound.canRemoveModerators || false,
+          canChangeSystemSettings: userFound.canChangeSystemSettings || false,
+          canAccessSecretRooms: userFound.isSupremeLeader || false,
+          canSeeChatPasswords: userFound.canSeeChatPasswords || false,
+          canKickUsers: userFound.isAdmin || userFound.isSupremeLeader || false
         },
         room: {
           id: globalRoom.id,
           name: globalRoom.name,
           description: globalRoom.description,
-          messages: globalRoom.messages.slice(-50)
+          messages: globalRoom.messages.slice(-50),
+          isSilenced: globalRoom.isSilenced || false
         },
-        systemSettings: systemSettings
+        systemSettings: {
+          ...systemSettings,
+          adminPassword: undefined // لا نرسل الباسورد
+        }
       });
 
-      io.to('global_official').emit('user-joined-room', {
+      // إشعار المستخدمين الآخرين
+      io.to('global_official_supreme').emit('user-joined-room', {
+        userId: userId,
         username: userFound.displayName || userFound.username,
-        avatar: userFound.avatar,
-        roomName: globalRoom.name
+        avatar: userFound.customImage || userFound.customAvatar || userFound.avatar,
+        roomName: globalRoom.name,
+        isSupreme: userFound.isSupremeLeader || false
       });
 
       updateRoomsList();
-      updateUsersList('global_official');
+      updateUsersList('global_official_supreme');
 
     } catch (error) {
       console.error('❌ خطأ في تسجيل الدخول:', error);
@@ -280,13 +382,27 @@ io.on('connection', (socket) => {
         return socket.emit('register-error', 'كلمة المرور يجب أن تكون 6 أحرف على الأقل');
       }
 
+      // فحص الحساب المكرر
       for (const user of users.values()) {
         if (user.username.toLowerCase() === username.toLowerCase()) {
           return socket.emit('register-error', 'اسم المستخدم موجود مسبقاً');
         }
       }
 
-      const userId = uuidv4();
+      // فحص تعدد الحسابات من نفس الـ IP
+      let accountsFromIP = 0;
+      for (const user of users.values()) {
+        if (user.registrationIP === socket.userIP) {
+          accountsFromIP++;
+        }
+      }
+
+      if (accountsFromIP >= 2) {
+        return socket.emit('register-error', 
+          'لديك بالفعل حسابان من هذا الجهاز. اتصل بالزعيم للحصول على إذن خاص');
+      }
+
+      const userId = 'user_' + uuidv4();
       const hashedPassword = bcrypt.hashSync(password, 10);
 
       const newUser = {
@@ -296,14 +412,20 @@ io.on('connection', (socket) => {
         password: hashedPassword,
         isAdmin: false,
         isSuperAdmin: false,
+        isSupremeLeader: false,
         isVerified: false,
         joinDate: new Date(),
         lastActive: new Date(),
+        registrationIP: socket.userIP,
         avatar: emoji || (gender === 'female' ? '👩' : '👨'),
         customAvatar: null,
+        customImage: null,
         nameChangeCount: 0,
         maxNameChanges: 0,
-        specialBadges: []
+        specialBadges: [],
+        glowingMessages: false,
+        isModerator: false,
+        moderatorRooms: new Set()
       };
 
       users.set(userId, newUser);
@@ -311,7 +433,8 @@ io.on('connection', (socket) => {
         userId: userId,
         gender: gender || 'male',
         avatar: emoji || (gender === 'female' ? '👩' : '👨'),
-        status: 'عضو جديد',
+        customImage: null,
+        status: '🌟 عضو جديد',
         country: 'global',
         joinDate: new Date()
       });
@@ -320,7 +443,7 @@ io.on('connection', (socket) => {
       console.log('✅ تسجيل ناجح:', username);
 
       socket.emit('register-success', {
-        message: 'تم إنشاء حسابك بنجاح!',
+        message: '🎉 تم إنشاء حسابك بنجاح! يمكنك الآن تسجيل الدخول',
         username: username
       });
 
@@ -339,47 +462,62 @@ io.on('connection', (socket) => {
       const room = rooms.get(socket.currentRoom);
       if (!room) return;
 
+      // فحص الصمت
       if (room.isSilenced && !user.isSupremeLeader) {
-        return socket.emit('message-error', 'الغرفة في وضع الصمت');
+        return socket.emit('message-error', '🔇 الغرفة في وضع الصمت من قبل الزعيم');
       }
 
+      // فحص الكتم
       const muteInfo = mutedUsers.get(socket.userId);
       if (muteInfo) {
-        if (!muteInfo.temporary || (muteInfo.expires && muteInfo.expires > Date.now())) {
-          const remaining = muteInfo.temporary ? 
+        const canUnmute = muteInfo.canOnlyBeRemovedBy === 'supreme' ? 
+          false : (muteInfo.temporary && muteInfo.expires && muteInfo.expires <= Date.now());
+        
+        if (!canUnmute) {
+          const remaining = muteInfo.temporary && muteInfo.expires ? 
             Math.ceil((muteInfo.expires - Date.now()) / 60000) : 'دائم';
           return socket.emit('message-error', 
-            `أنت مكتوم ${muteInfo.temporary ? 'لمدة ' + remaining + ' دقيقة' : 'بشكل دائم'}`);
+            `أنت مكتوم ${muteInfo.temporary ? `لمدة ${remaining} دقيقة` : 'بشكل دائم'} من قبل ${muteInfo.mutedBy}`);
+        } else {
+          mutedUsers.delete(socket.userId);
         }
       }
 
+      const messageText = data.text.trim().substring(0, 500);
+      if (!messageText) return;
+
       const message = {
-        id: uuidv4(),
+        id: 'msg_' + uuidv4(),
         userId: socket.userId,
         username: user.displayName || user.username,
-        avatar: user.customAvatar || user.avatar,
-        text: data.text.trim().substring(0, 300),
+        avatar: user.customImage || user.customAvatar || user.avatar,
+        text: messageText,
         timestamp: new Date().toLocaleTimeString('ar-EG', {
           hour: '2-digit',
-          minute: '2-digit'
+          minute: '2-digit',
+          second: '2-digit'
         }),
         fullTimestamp: new Date(),
-        isSupremeLeader: user.isSupremeLeader,
-        isSuperAdmin: user.isSuperAdmin,
-        isAdmin: user.isAdmin,
-        isModerator: room.moderators.has(socket.userId),
-        isVerified: user.isVerified,
+        isSupremeLeader: user.isSupremeLeader || false,
+        isSuperAdmin: user.isSuperAdmin || false,
+        isAdmin: user.isAdmin || false,
+        isModerator: room.moderators.has(socket.userId) || false,
+        isVerified: user.isVerified || false,
         specialBadges: user.specialBadges || [],
         roomId: socket.currentRoom,
-        glowing: user.glowingMessages || false
+        glowing: user.glowingMessages || false,
+        canDelete: user.isSupremeLeader || room.creatorId === socket.userId
       };
 
       room.messages.push(message);
       
-      if (room.messages.length > 100) {
-        room.messages = room.messages.slice(-100);
-        io.to(socket.currentRoom).emit('chat-cleaned', {
-          message: '🧹 تم تنظيف الرسائل القديمة'
+      // تنظيف تلقائي
+      if (room.messages.length > room.maxMessages) {
+        const removed = room.messages.length - room.maxMessages;
+        room.messages = room.messages.slice(-room.maxMessages);
+        io.to(socket.currentRoom).emit('chat-auto-cleaned', {
+          message: `🧹 تم تنظيف ${removed} رسالة قديمة تلقائياً`,
+          remaining: room.messages.length
         });
       }
 
@@ -388,6 +526,7 @@ io.on('connection', (socket) => {
 
     } catch (error) {
       console.error('خطأ في إرسال الرسالة:', error);
+      socket.emit('message-error', 'فشل إرسال الرسالة');
     }
   });
 
@@ -398,11 +537,18 @@ io.on('connection', (socket) => {
       if (!user) return;
 
       const roomId = 'room_' + uuidv4();
-      
+      const roomName = data.name.trim().substring(0, 50);
+      const roomDesc = data.description?.trim().substring(0, 200) || '';
+      const roomPass = data.password?.trim() || null;
+
+      if (!roomName) {
+        return socket.emit('error', 'أدخل اسم الغرفة');
+      }
+
       const newRoom = {
         id: roomId,
-        name: data.name.substring(0, 50),
-        description: data.description?.substring(0, 200) || '',
+        name: roomName,
+        description: roomDesc,
         createdBy: user.displayName || user.username,
         creatorId: socket.userId,
         createdAt: new Date(),
@@ -411,10 +557,17 @@ io.on('connection', (socket) => {
         isActive: true,
         isGlobal: false,
         isOfficial: false,
-        hasPassword: !!data.password,
-        password: data.password ? bcrypt.hashSync(data.password, 10) : null,
+        isSecret: false,
+        hasPassword: !!roomPass,
+        password: roomPass ? bcrypt.hashSync(roomPass, 10) : null,
+        rawPassword: user.isSupremeLeader ? roomPass : null,
         moderators: new Set(),
-        isSilenced: false
+        isSilenced: false,
+        silencedBy: null,
+        maxMessages: 100,
+        autoClean: true,
+        canLeave: true,
+        canDelete: true
       };
 
       rooms.set(roomId, newRoom);
@@ -422,13 +575,15 @@ io.on('connection', (socket) => {
       socket.emit('room-created', {
         roomId: roomId,
         roomName: newRoom.name,
-        message: 'تم إنشاء الغرفة بنجاح!'
+        message: '✅ تم إنشاء الغرفة بنجاح!'
       });
 
       updateRoomsList();
-      console.log('✅ غرفة جديدة:', newRoom.name);
+      console.log('✅ غرفة جديدة:', newRoom.name, 'بواسطة', user.displayName);
+      
     } catch (error) {
       console.error('خطأ في إنشاء غرفة:', error);
+      socket.emit('error', 'فشل إنشاء الغرفة');
     }
   });
 
@@ -443,6 +598,7 @@ io.on('connection', (socket) => {
         return socket.emit('error', 'الغرفة غير موجودة');
       }
 
+      // فحص كلمة السر
       if (room.hasPassword && !user.isSupremeLeader) {
         if (!data.password) {
           return socket.emit('room-password-required', {
@@ -451,23 +607,26 @@ io.on('connection', (socket) => {
           });
         }
         if (!bcrypt.compareSync(data.password, room.password)) {
-          return socket.emit('error', 'كلمة المرور غير صحيحة');
+          return socket.emit('error', '❌ كلمة المرور غير صحيحة');
         }
       }
 
-      if (socket.currentRoom && socket.currentRoom !== 'global_official') {
+      // مغادرة الغرفة السابقة
+      if (socket.currentRoom && socket.currentRoom !== 'global_official_supreme') {
         const prevRoom = rooms.get(socket.currentRoom);
-        if (prevRoom && !prevRoom.isOfficial) {
+        if (prevRoom && prevRoom.canLeave) {
           prevRoom.users.delete(socket.userId);
           socket.leave(socket.currentRoom);
           updateUsersList(socket.currentRoom);
         }
       }
 
+      // الانضمام للغرفة الجديدة
       room.users.add(socket.userId);
       socket.join(data.roomId);
       socket.currentRoom = data.roomId;
 
+      // إرسال بيانات الغرفة
       socket.emit('room-joined', {
         room: {
           id: room.id,
@@ -477,25 +636,33 @@ io.on('connection', (socket) => {
           userCount: room.users.size,
           isModerator: room.moderators.has(socket.userId),
           isCreator: room.creatorId === socket.userId,
-          canLeave: !room.cannotLeave,
-          password: user.isSupremeLeader ? data.password : null
+          isSupreme: user.isSupremeLeader,
+          canLeave: room.canLeave && !room.isGlobal,
+          isSilenced: room.isSilenced,
+          hasPassword: room.hasPassword,
+          password: user.isSupremeLeader ? room.rawPassword : null
         }
       });
 
+      // إشعار المستخدمين
       io.to(data.roomId).emit('user-joined-room', {
+        userId: socket.userId,
         username: user.displayName || user.username,
-        avatar: user.customAvatar || user.avatar,
-        roomName: room.name
+        avatar: user.customImage || user.customAvatar || user.avatar,
+        roomName: room.name,
+        isSupreme: user.isSupremeLeader || false
       });
 
       updateUsersList(data.roomId);
       updateRoomsList();
+      
     } catch (error) {
       console.error('خطأ في الانضمام:', error);
+      socket.emit('error', 'فشل الانضمام للغرفة');
     }
   });
 
-  // كتم
+  // كتم مستخدم
   socket.on('mute-user', async (data) => {
     try {
       const admin = users.get(socket.userId);
@@ -504,93 +671,473 @@ io.on('connection', (socket) => {
       if (!admin || !targetUser) return;
       
       if (targetUser.cannotBeMuted || targetUser.isSupremeLeader) {
-        return socket.emit('error', 'لا يمكن كتم هذا المستخدم');
+        return socket.emit('error', '❌ لا يمكن كتم الزعيم أو المحميين');
       }
 
       const room = rooms.get(socket.currentRoom);
       const isModerator = room?.moderators.has(socket.userId);
-      const isAdmin = admin.isSupremeLeader;
+      const isSupreme = admin.isSupremeLeader;
 
-      if (!isModerator && !isAdmin) {
-        return socket.emit('error', 'ليس لديك صلاحية');
+      if (!isModerator && !isSupreme) {
+        return socket.emit('error', '❌ ليس لديك صلاحية الحظر');
       }
 
-      const duration = data.duration || 10;
-      mutedUsers.set(data.userId, {
-        expires: duration > 0 ? Date.now() + (duration * 60000) : null,
-        reason: data.reason || 'مخالفة',
-        mutedBy: admin.isSupremeLeader ? 'الزعيم' : admin.displayName,
-        mutedById: socket.userId,
-        temporary: duration > 0,
-        roomId: socket.currentRoom,
-        canOnlyBeRemovedBy: admin.isSupremeLeader ? 'supreme' : null
-      });
-
-      io.to(socket.currentRoom).emit('user-muted', {
-        username: targetUser.displayName,
-        duration: duration > 0 ? duration : 'دائم',
-        mutedBy: mutedUsers.get(data.userId).mutedBy
-      });
-
-      socket.emit('action-success', `تم كتم ${targetUser.displayName}`);
-    } catch (error) {
-      console.error('خطأ في الكتم:', error);
-    }
-  });
-
-  // حظر
-  socket.on('ban-user', async (data) => {
-    try {
-      const admin = users.get(socket.userId);
-      const targetUser = users.get(data.userId);
+      const reason = data.reason?.trim() || 'مخالفة القوانين';
       
-      if (!admin || !targetUser) return;
-      
-      if (targetUser.cannotBeBanned || targetUser.isSupremeLeader) {
-        return socket.emit('error', 'لا يمكن حظر هذا المستخدم');
-      }
-
-      const room = rooms.get(socket.currentRoom);
-      const isModerator = room?.moderators.has(socket.userId);
-      const isAdmin = admin.isSupremeLeader;
-
-      if (!isModerator && !isAdmin) {
-        return socket.emit('error', 'ليس لديك صلاحية');
-      }
-
       bannedUsers.set(data.userId, {
-        reason: data.reason || 'مخالفة',
-        bannedBy: admin.isSupremeLeader ? 'الزعيم' : admin.displayName,
+        reason: reason,
+        bannedBy: isSupreme ? 'الزعيم' : (admin.displayName || admin.username),
         bannedById: socket.userId,
         bannedAt: new Date(),
-        canOnlyBeRemovedBy: admin.isSupremeLeader ? 'supreme' : null
+        canOnlyBeRemovedBy: isSupreme ? 'supreme' : null,
+        userIP: targetUser.registrationIP
       });
 
-      bannedIPs.set(socket.userIP, {
+      // حظر الـ IP
+      bannedIPs.set(targetUser.registrationIP, {
         userId: data.userId,
-        bannedAt: new Date()
+        bannedAt: new Date(),
+        reason: reason
       });
 
-      const targetSocket = Array.from(io.sockets.sockets.values())
-        .find(s => s.userId === data.userId);
+      // قطع اتصال المستخدم
+      const targetSockets = Array.from(io.sockets.sockets.values())
+        .filter(s => s.userId === data.userId);
       
-      if (targetSocket) {
-        targetSocket.emit('banned', {
-          reason: data.reason,
-          bannedBy: bannedUsers.get(data.userId).bannedBy
+      targetSockets.forEach(s => {
+        s.emit('banned', {
+          reason: reason,
+          bannedBy: bannedUsers.get(data.userId).bannedBy,
+          isSupremeBan: isSupreme
         });
-        targetSocket.disconnect();
-      }
+        s.disconnect(true);
+      });
 
-      socket.emit('action-success', `تم حظر ${targetUser.displayName}`);
+      socket.emit('action-success', `✅ تم حظر ${targetUser.displayName || targetUser.username} نهائياً`);
+      console.log(`🚫 حظر ${targetUser.username} بواسطة ${admin.username}`);
+      
     } catch (error) {
       console.error('خطأ في الحظر:', error);
+      socket.emit('error', 'فشل عملية الحظر');
     }
   });
 
+  // إلغاء الكتم
+  socket.on('unmute-user', async (data) => {
+    try {
+      const admin = users.get(socket.userId);
+      if (!admin) return;
+
+      const muteInfo = mutedUsers.get(data.userId);
+      if (!muteInfo) {
+        return socket.emit('error', 'المستخدم غير مكتوم');
+      }
+
+      if (muteInfo.canOnlyBeRemovedBy === 'supreme' && !admin.isSupremeLeader) {
+        return socket.emit('error', '❌ فقط الزعيم يمكنه إلغاء هذا الكتم');
+      }
+
+      mutedUsers.delete(data.userId);
+      
+      const targetUser = users.get(data.userId);
+      socket.emit('action-success', `✅ تم إلغاء كتم ${targetUser?.displayName || 'المستخدم'}`);
+      
+      io.emit('user-unmuted', {
+        userId: data.userId,
+        username: targetUser?.displayName || 'المستخدم'
+      });
+      
+    } catch (error) {
+      console.error('خطأ في إلغاء الكتم:', error);
+    }
+  });
+
+  // إلغاء الحظر
+  socket.on('unban-user', async (data) => {
+    try {
+      const admin = users.get(socket.userId);
+      if (!admin || !admin.isSupremeLeader) {
+        return socket.emit('error', '❌ فقط الزعيم يمكنه إلغاء الحظر');
+      }
+
+      const banInfo = bannedUsers.get(data.userId);
+      if (!banInfo) {
+        return socket.emit('error', 'المستخدم غير محظور');
+      }
+
+      // إلغاء حظر الـ IP
+      if (banInfo.userIP) {
+        bannedIPs.delete(banInfo.userIP);
+      }
+
+      bannedUsers.delete(data.userId);
+      
+      const targetUser = users.get(data.userId);
+      socket.emit('action-success', `✅ تم إلغاء حظر ${targetUser?.displayName || 'المستخدم'}`);
+      console.log(`✅ إلغاء حظر ${targetUser?.username} بواسطة الزعيم`);
+      
+    } catch (error) {
+      console.error('خطأ في إلغاء الحظر:', error);
+    }
+  });
+
+  // إضافة مشرف
+  socket.on('add-moderator', async (data) => {
+    try {
+      const admin = users.get(socket.userId);
+      if (!admin || !admin.isSupremeLeader) {
+        return socket.emit('error', '❌ فقط الزعيم يمكنه إضافة مشرفين');
+      }
+
+      const targetUser = users.get(data.userId);
+      const room = rooms.get(data.roomId || socket.currentRoom);
+      
+      if (!targetUser || !room) return;
+
+      room.moderators.add(data.userId);
+      
+      if (!targetUser.moderatorRooms) targetUser.moderatorRooms = new Set();
+      targetUser.moderatorRooms.add(room.id);
+
+      // تحديد الصلاحيات
+      if (data.permissions) {
+        userPermissions.set(data.userId + '_' + room.id, {
+          canMute: data.permissions.canMute !== false,
+          canKick: data.permissions.canKick || false,
+          canChangeRoomName: data.permissions.canChangeRoomName || false,
+          canChangePassword: data.permissions.canChangePassword || false
+        });
+      }
+
+      socket.emit('action-success', `✅ تم إضافة ${targetUser.displayName} كمشرف`);
+      
+      io.to(room.id).emit('moderator-added', {
+        userId: data.userId,
+        username: targetUser.displayName,
+        roomName: room.name
+      });
+      
+    } catch (error) {
+      console.error('خطأ في إضافة مشرف:', error);
+    }
+  });
+
+  // حذف رسالة
+  socket.on('delete-message', async (data) => {
+    try {
+      const admin = users.get(socket.userId);
+      if (!admin || !admin.canDeleteAnyMessage) {
+        return socket.emit('error', '❌ ليس لديك صلاحية حذف الرسائل');
+      }
+
+      const room = rooms.get(data.roomId);
+      if (!room) return;
+
+      const messageIndex = room.messages.findIndex(m => m.id === data.messageId);
+      if (messageIndex !== -1) {
+        const deleted = room.messages.splice(messageIndex, 1)[0];
+        
+        io.to(data.roomId).emit('message-deleted', {
+          messageId: data.messageId,
+          deletedBy: admin.displayName
+        });
+        
+        socket.emit('action-success', '✅ تم حذف الرسالة');
+      }
+      
+    } catch (error) {
+      console.error('خطأ في حذف رسالة:', error);
+    }
+  });
+
+  // تنظيف الشات
+  socket.on('clean-chat', async (data) => {
+    try {
+      const admin = users.get(socket.userId);
+      if (!admin || !admin.isSupremeLeader) {
+        return socket.emit('error', '❌ فقط الزعيم يمكنه تنظيف الشات');
+      }
+
+      const room = rooms.get(data.roomId);
+      if (!room) return;
+
+      const count = room.messages.length;
+      room.messages = [];
+      
+      io.to(data.roomId).emit('chat-cleaned', {
+        message: `🧹 تم تنظيف ${count} رسالة بواسطة الزعيم`,
+        cleanedBy: admin.displayName
+      });
+      
+      socket.emit('action-success', `✅ تم تنظيف ${count} رسالة`);
+      
+    } catch (error) {
+      console.error('خطأ في تنظيف الشات:', error);
+    }
+  });
+
+  // صمت الغرفة
+  socket.on('silence-room', async (data) => {
+    try {
+      const admin = users.get(socket.userId);
+      if (!admin || !admin.isSupremeLeader) {
+        return socket.emit('error', '❌ فقط الزعيم يمكنه إصمات الغرف');
+      }
+
+      const room = rooms.get(data.roomId);
+      if (!room) return;
+
+      room.isSilenced = true;
+      room.silencedBy = admin.displayName;
+      
+      io.to(data.roomId).emit('room-silenced', {
+        message: '🔇 تم إصمات الغرفة من قبل الزعيم',
+        silencedBy: admin.displayName
+      });
+      
+      socket.emit('action-success', '✅ تم إصمات الغرفة');
+      
+    } catch (error) {
+      console.error('خطأ في إصمات الغرفة:', error);
+    }
+  });
+
+  // إلغاء صمت الغرفة
+  socket.on('unsilence-room', async (data) => {
+    try {
+      const admin = users.get(socket.userId);
+      if (!admin || !admin.isSupremeLeader) {
+        return socket.emit('error', '❌ فقط الزعيم يمكنه إلغاء الإصمات');
+      }
+
+      const room = rooms.get(data.roomId);
+      if (!room) return;
+
+      room.isSilenced = false;
+      room.silencedBy = null;
+      
+      io.to(data.roomId).emit('room-unsilenced', {
+        message: '🔊 تم إلغاء إصمات الغرفة',
+        by: admin.displayName
+      });
+      
+      socket.emit('action-success', '✅ تم إلغاء إصمات الغرفة');
+      
+    } catch (error) {
+      console.error('خطأ في إلغاء الإصمات:', error);
+    }
+  });
+
+  // حذف غرفة
+  socket.on('delete-room', async (data) => {
+    try {
+      const admin = users.get(socket.userId);
+      if (!admin || !admin.isSupremeLeader) {
+        return socket.emit('error', '❌ فقط الزعيم يمكنه حذف الغرف');
+      }
+
+      const room = rooms.get(data.roomId);
+      if (!room) return;
+
+      if (room.cannotBeDeleted) {
+        return socket.emit('error', '❌ لا يمكن حذف الغرفة العالمية');
+      }
+
+      // طرد الجميع
+      io.to(data.roomId).emit('room-deleted', {
+        message: '❌ تم حذف الغرفة من قبل الزعيم',
+        roomName: room.name
+      });
+
+      // حذف الغرفة
+      rooms.delete(data.roomId);
+      
+      socket.emit('action-success', `✅ تم حذف غرفة ${room.name}`);
+      updateRoomsList();
+      
+    } catch (error) {
+      console.error('خطأ في حذف غرفة:', error);
+    }
+  });
+
+  // تغيير اسم الغرفة
+  socket.on('change-room-name', async (data) => {
+    try {
+      const user = users.get(socket.userId);
+      const room = rooms.get(data.roomId);
+      
+      if (!room) return;
+
+      const isCreator = room.creatorId === socket.userId;
+      const isSupreme = user?.isSupremeLeader;
+      const isModerator = room.moderators.has(socket.userId);
+      const perms = userPermissions.get(socket.userId + '_' + room.id);
+
+      if (!isSupreme && !isCreator && !(isModerator && perms?.canChangeRoomName)) {
+        return socket.emit('error', '❌ ليس لديك صلاحية تغيير اسم الغرفة');
+      }
+
+      const newName = data.name.trim().substring(0, 50);
+      if (!newName) return;
+
+      room.name = newName;
+      
+      io.to(data.roomId).emit('room-name-changed', {
+        newName: newName,
+        changedBy: user?.displayName
+      });
+      
+      updateRoomsList();
+      
+    } catch (error) {
+      console.error('خطأ في تغيير اسم الغرفة:', error);
+    }
+  });
+
+  // إرسال رسالة دعم
+  socket.on('send-support-message', async (data) => {
+    try {
+      const messageId = 'support_' + uuidv4();
+      
+      supportMessages.set(messageId, {
+        id: messageId,
+        from: data.from || 'مجهول',
+        message: data.message.trim().substring(0, 500),
+        sentAt: new Date(),
+        fromIP: socket.userIP,
+        isBanned: bannedIPs.has(socket.userIP)
+      });
+
+      socket.emit('support-message-sent', {
+        message: '✅ تم إرسال رسالتك للزعيم'
+      });
+
+      console.log('📩 رسالة دعم جديدة من:', data.from);
+      
+    } catch (error) {
+      console.error('خطأ في رسالة الدعم:', error);
+    }
+  });
+
+  // الحصول على رسائل الدعم (للزعيم فقط)
+  socket.on('get-support-messages', async () => {
+    try {
+      const user = users.get(socket.userId);
+      if (!user || !user.isSupremeLeader) return;
+
+      const messages = Array.from(supportMessages.values()).map(msg => ({
+        ...msg,
+        canUnban: msg.isBanned
+      }));
+
+      socket.emit('support-messages-list', messages);
+      
+    } catch (error) {
+      console.error('خطأ في جلب رسائل الدعم:', error);
+    }
+  });
+
+  // حذف رسالة دعم
+  socket.on('delete-support-message', async (data) => {
+    try {
+      const user = users.get(socket.userId);
+      if (!user || !user.isSupremeLeader) return;
+
+      supportMessages.delete(data.messageId);
+      socket.emit('action-success', '✅ تم حذف الرسالة');
+      
+    } catch (error) {
+      console.error('خطأ في حذف رسالة دعم:', error);
+    }
+  });
+
+  // تحديث إعدادات النظام
+  socket.on('update-system-settings', async (data) => {
+    try {
+      const user = users.get(socket.userId);
+      if (!user || !user.isSupremeLeader) {
+        return socket.emit('error', '❌ فقط الزعيم يمكنه تغيير الإعدادات');
+      }
+
+      if (data.setting && data.value !== undefined) {
+        systemSettings[data.setting] = data.value;
+        
+        // إشعار الجميع بالتغييرات المهمة
+        if (data.setting === 'siteColor') {
+          io.emit('site-color-changed', { color: data.value });
+        } else if (data.setting === 'siteLogo') {
+          io.emit('site-logo-changed', { logo: data.value });
+        } else if (data.setting === 'siteTitle') {
+          io.emit('site-title-changed', { title: data.value });
+        }
+        
+        socket.emit('action-success', '✅ تم تحديث الإعدادات');
+      }
+      
+    } catch (error) {
+      console.error('خطأ في تحديث الإعدادات:', error);
+    }
+  });
+
+  // تحديث الروابط الاجتماعية
+  socket.on('update-social-links', async (data) => {
+    try {
+      const user = users.get(socket.userId);
+      if (!user || !user.isSupremeLeader) return;
+
+      systemSettings.socialLinks = {
+        telegram: data.telegram || '',
+        instagram: data.instagram || '',
+        youtube: data.youtube || '',
+        email: data.email || ''
+      };
+
+      io.emit('social-links-updated', systemSettings.socialLinks);
+      socket.emit('action-success', '✅ تم تحديث روابط التواصل');
+      
+    } catch (error) {
+      console.error('خطأ في تحديث الروابط:', error);
+    }
+  });
+
+  // الحصول على القوائم
   socket.on('get-rooms', () => updateRoomsList(socket));
   socket.on('get-users', (data) => updateUsersList(data.roomId, socket));
   
+  socket.on('get-muted-list', () => {
+    const user = users.get(socket.userId);
+    if (!user || !user.isSupremeLeader) return;
+
+    const mutedList = Array.from(mutedUsers.entries()).map(([userId, info]) => {
+      const targetUser = users.get(userId);
+      return {
+        userId: userId,
+        username: targetUser?.displayName || 'مجهول',
+        ...info,
+        canRemove: info.canOnlyBeRemovedBy !== 'supreme' || user.isSupremeLeader
+      };
+    });
+
+    socket.emit('muted-list', mutedList);
+  });
+
+  socket.on('get-banned-list', () => {
+    const user = users.get(socket.userId);
+    if (!user || !user.isSupremeLeader) return;
+
+    const bannedList = Array.from(bannedUsers.entries()).map(([userId, info]) => {
+      const targetUser = users.get(userId);
+      return {
+        userId: userId,
+        username: targetUser?.displayName || 'مجهول',
+        ...info
+      };
+    });
+
+    socket.emit('banned-list', bannedList);
+  });
+
+  // قطع الاتصال
   socket.on('disconnect', () => {
     if (socket.userId) {
       onlineUsers.delete(socket.userId);
@@ -598,29 +1145,47 @@ io.on('connection', (socket) => {
       rooms.forEach(room => {
         if (!room.isOfficial && room.users.has(socket.userId)) {
           room.users.delete(socket.userId);
+          updateUsersList(room.id);
         }
       });
+      
+      const user = users.get(socket.userId);
+      if (user) {
+        user.lastActive = new Date();
+      }
     }
     console.log('🔌 قطع اتصال:', socket.id);
   });
 
+  // Heartbeat
   socket.on('ping', () => {
     if (socket.userId) {
       onlineUsers.set(socket.userId, Date.now());
+      socket.emit('pong');
     }
   });
 });
 
+// دوال مساعدة
 function updateRoomsList(socket = null) {
-  const roomList = Array.from(rooms.values()).map(room => ({
-    id: room.id,
-    name: room.name,
-    description: room.description,
-    userCount: room.users.size,
-    hasPassword: room.hasPassword,
-    isOfficial: room.isOfficial,
-    createdBy: room.createdBy
-  }));
+  const roomList = Array.from(rooms.values())
+    .filter(room => !room.isSecret)
+    .map(room => ({
+      id: room.id,
+      name: room.name,
+      description: room.description,
+      userCount: room.users.size,
+      hasPassword: room.hasPassword,
+      isOfficial: room.isOfficial,
+      isGlobal: room.isGlobal,
+      createdBy: room.createdBy,
+      isSilenced: room.isSilenced
+    }))
+    .sort((a, b) => {
+      if (a.isOfficial) return -1;
+      if (b.isOfficial) return 1;
+      return b.userCount - a.userCount;
+    });
 
   if (socket) {
     socket.emit('rooms-list', roomList);
@@ -641,14 +1206,15 @@ function updateUsersList(roomId, socket = null) {
       id: userId,
       username: user.username,
       displayName: user.displayName || user.username,
-      avatar: user.customAvatar || user.avatar,
+      avatar: user.customImage || user.customAvatar || user.avatar,
       isOnline: onlineUsers.has(userId),
-      isSupremeLeader: user.isSupremeLeader,
-      isSuperAdmin: user.isSuperAdmin,
-      isAdmin: user.isAdmin,
+      isSupremeLeader: user.isSupremeLeader || false,
+      isSuperAdmin: user.isSuperAdmin || false,
+      isAdmin: user.isAdmin || false,
       isModerator: room.moderators.has(userId),
-      isVerified: user.isVerified,
-      specialBadges: user.specialBadges || []
+      isVerified: user.isVerified || false,
+      specialBadges: user.specialBadges || [],
+      glowingMessages: user.glowingMessages || false
     };
   }).filter(Boolean);
 
@@ -659,6 +1225,7 @@ function updateUsersList(roomId, socket = null) {
   }
 }
 
+// معالجة الأخطاء
 process.on('uncaughtException', (error) => {
   console.error('❌ Uncaught Exception:', error);
 });
@@ -667,13 +1234,80 @@ process.on('unhandledRejection', (error) => {
   console.error('❌ Unhandled Rejection:', error);
 });
 
+// تشغيل الخادم
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`
-╔═══════════════════════════════════════════════════════╗
-║          ✅ الخادم يعمل بنجاح                        ║
-║  🔗 البورت: ${PORT}                                  ║
-║  🌐 http://localhost:${PORT}                         ║
-║  👑 نظام MOBO جاهز                                   ║
-╚═══════════════════════════════════════════════════════╝
+╔════════════════════════════════════════════════════════════════╗
+║                  ✅ الخادم يعمل بنجاح                         ║
+║  🔗 البورت: ${PORT.toString().padEnd(48)}║
+║  🌐 الرابط: http://localhost:${PORT.toString().padEnd(35)}║
+║  👑 نظام MOBO - الأقوى والأكثر تطوراً                        ║
+║  ⚡ جاهز لاستقبال الاتصالات                                  ║
+║  🛡️ محمي ضد الاختراق والنسخ                                 ║
+╚════════════════════════════════════════════════════════════════╝
+
+📊 إحصائيات التشغيل:
+   • المستخدمون: ${users.size}
+   • الغرف: ${rooms.size}
+   • الإعدادات: محملة ✅
+   • الحماية: مفعلة 🛡️
+
+⚠️  تذكير: هذا النظام محمي بحقوق الطبع والنشر
+   © 2025 MOBO - جميع الحقوق محفوظة للزعيم
   `);
 });
+
+// تصدير للاختبار
+module.exports = { app, server, io };userId);
+      const isSupreme = admin.isSupremeLeader;
+
+      if (!isModerator && !isSupreme) {
+        return socket.emit('error', '❌ ليس لديك صلاحية الكتم');
+      }
+
+      const duration = parseInt(data.duration) || 10;
+      const reason = data.reason?.trim() || 'مخالفة القوانين';
+      
+      mutedUsers.set(data.userId, {
+        expires: duration > 0 ? Date.now() + (duration * 60000) : null,
+        reason: reason,
+        mutedBy: isSupreme ? 'الزعيم' : (admin.displayName || admin.username),
+        mutedById: socket.userId,
+        temporary: duration > 0,
+        roomId: socket.currentRoom,
+        mutedAt: new Date(),
+        canOnlyBeRemovedBy: isSupreme ? 'supreme' : null
+      });
+
+      io.to(socket.currentRoom).emit('user-muted', {
+        userId: data.userId,
+        username: targetUser.displayName || targetUser.username,
+        duration: duration > 0 ? `${duration} دقيقة` : 'دائم',
+        reason: reason,
+        mutedBy: mutedUsers.get(data.userId).mutedBy,
+        isSupremeMute: isSupreme
+      });
+
+      socket.emit('action-success', `✅ تم كتم ${targetUser.displayName || targetUser.username}`);
+      console.log(`🔇 كتم ${targetUser.username} بواسطة ${admin.username}`);
+      
+    } catch (error) {
+      console.error('خطأ في الكتم:', error);
+      socket.emit('error', 'فشل عملية الكتم');
+    }
+  });
+
+  // حظر مستخدم
+  socket.on('ban-user', async (data) => {
+    try {
+      const admin = users.get(socket.userId);
+      const targetUser = users.get(data.userId);
+      
+      if (!admin || !targetUser) return;
+      
+      if (targetUser.cannotBeBanned || targetUser.isSupremeLeader) {
+        return socket.emit('error', '❌ لا يمكن حظر الزعيم أو المحميين');
+      }
+
+      const room = rooms.get(socket.currentRoom);
+      const isModerator = room?.moderators.has(socket.
