@@ -206,7 +206,6 @@ function setupSocketListeners() {
 
     socket.on('social-links-updated', (data) => {
         updateSocialLinks(data);
-        showAlert('📱 تم تحديث روابط التواصل', 'info');
     });
 
     socket.on('support-message-sent', (data) => {
