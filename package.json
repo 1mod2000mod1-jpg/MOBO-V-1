@@ -1,62 +1,26 @@
 {
-  "name": "mobo-global-chat-system",
-  "version": "7.0.0",
-  "description": "موقع MOBO العالمي للدردشة - النظام الأقوى والأجمل © 2025 - نظام دردشة عربي متطور بميزات خارقة",
+  "name": "cold-room-chat",
+  "version": "1.0.0",
+  "description": "Cold Room - Premium Chat Platform",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js",
-    "test": "echo \"النظام جاهز للاختبار\" && exit 0"
+    "start": "node server.js"
   },
   "engines": {
-    "node": ">=14.0.0",
-    "npm": ">=6.0.0"
+    "node": ">=14.0.0"
   },
   "dependencies": {
     "express": "^4.18.2",
     "socket.io": "^4.7.5",
     "bcryptjs": "^2.4.3",
-    "uuid": "^9.0.1",
-    "multer": "^1.4.5-lts.1"
+    "uuid": "^9.0.1"
   },
   "keywords": [
     "chat",
-    "arabic",
-    "دردشة",
-    "عربية",
+    "cold-room",
     "realtime",
-    "websocket",
-    "socket.io",
-    "mobo",
-    "secure",
-    "advanced",
-    "supreme",
-    "arabic-chat",
-    "real-time-chat",
-    "group-chat",
-    "private-messages",
-    "chat-rooms",
-    "moderation",
-    "admin-panel"
+    "websocket"
   ],
-  "author": {
-    "name": "MOBO - الزعيم",
-    "email": "supreme@mobo.com",
-    "url": "https://mobo.chat"
-  },
-  "license": "PROPRIETARY",
-  "private": true,
-  "repository": {
-    "type": "git",
-    "url": "private"
-  },
-  "bugs": {
-    "url": "https://mobo.chat/support",
-    "email": "support@mobo.com"
-  },
-  "homepage": "https://mobo.chat",
-  "copyright": "© 2025 MOBO - جميع الحقوق محفوظة للزعيم - يمنع النسخ",
-  "config": {
-    "port": "3000"
-  }
+  "author": "Cold Room King",
+  "license": "PROPRIETARY"
 }
