@@ -434,8 +434,8 @@ npm start
 # http://localhost:3000
 
 # 5. سجل دخول كالزعيم
-# Username: MOBO
-# Password: Mobo@Supreme2025!@#
+# Username: 
+# Password: 
 
 # 🎉 استمتع!
 ```
