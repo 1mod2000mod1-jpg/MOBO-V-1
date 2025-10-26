@@ -1,7 +1,7 @@
 {
-  "name": "cold-room-chat",
-  "version": "1.0.0",
-  "description": "Cold Room - Premium Chat Platform",
+  "name": "cold-room-chat-v2",
+  "version": "2.0.0",
+  "description": "Cold Room - Premium Chat Platform V2 - Complete Edition",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -19,7 +19,9 @@
     "chat",
     "cold-room",
     "realtime",
-    "websocket"
+    "websocket",
+    "persistent",
+    "complete"
   ],
   "author": "Cold Room King",
   "license": "PROPRIETARY"
