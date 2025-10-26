@@ -8,7 +8,7 @@
     <title id="site-title">Cold Room - Chat</title>
     <meta name="description" content="Cold Room - Premium Chat Platform">
     
-    <link rel="icon" type="image/x-icon" id="site-favicon" href="https://j.top4top.io/p_3585vud691.jpg">
+    <link rel="icon" type="image/x-icon" id="site-favicon" href="https://i.ibb.co/ZYW3VTp/cold-room-logo.png">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -18,7 +18,8 @@
     <canvas id="snowman-canvas"></canvas>
     
     <!-- موسيقى الخلفية -->
-    <audio id="background-music" loop></audio>
+    <audio id="login-music" loop></audio>
+    <audio id="chat-music" loop></audio>
 
     <!-- شاشة تسجيل الدخول -->
     <div id="login-screen" class="screen active">
@@ -26,7 +27,7 @@
             
             <!-- الشعار -->
             <div class="site-logo">
-                <img src="https://j.top4top.io/p_3585vud691.jpg" 
+                <img src="https://i.ibb.co/ZYW3VTp/cold-room-logo.png" 
                      alt="Cold Room" 
                      class="logo-image"
                      id="main-logo">
@@ -59,6 +60,11 @@
                                maxlength="100" class="modern-input" autocomplete="new-password">
                         <input type="text" id="register-displayname" placeholder="Display Name" 
                                maxlength="30" class="modern-input">
+                        <select id="register-gender" class="modern-input">
+                            <option value="">Select Gender</option>
+                            <option value="prince">🤴 Prince (Male)</option>
+                            <option value="princess">👸 Princess (Female)</option>
+                        </select>
                     </div>
                     <button class="modern-btn" onclick="register()">
                         <span class="btn-text">Create Account</span>
@@ -97,7 +103,7 @@
             <header class="chat-header">
                 <div class="header-left">
                     <div class="header-logo">
-                        <img src="https://j.top4top.io/p_3585vud691.jpg" 
+                        <img src="https://i.ibb.co/ZYW3VTp/cold-room-logo.png" 
                              alt="Cold Room" 
                              class="header-logo-image"
                              id="header-logo">
@@ -157,9 +163,16 @@
                 
                 <!-- منطقة الرسائل -->
                 <div class="chat-content">
+                    <!-- مشغل يوتيوب -->
+                    <div id="youtube-player-container" style="display: none;">
+                        <div id="youtube-player"></div>
+                        <button class="modern-btn small" onclick="closeYouTube()" 
+                                style="margin: 10px;">Close Video</button>
+                    </div>
+
                     <div class="chat-messages" id="messages">
                         <div class="welcome-message glass-card">
-                            <img src="https://j.top4top.io/p_3585vud691.jpg" 
+                            <img src="https://i.ibb.co/ZYW3VTp/cold-room-logo.png" 
                                  alt="Welcome" class="welcome-logo">
                             <h3>Welcome to Cold Room! ❄️</h3>
                             <p>Start chatting with others</p>
@@ -168,6 +181,17 @@
                     
                     <!-- أدوات الإرسال -->
                     <div class="chat-tools">
+                        <div class="tools-buttons" id="owner-tools" style="display: none;">
+                            <button class="tool-btn" onclick="showImageUpload()" title="Send Image">
+                                🖼️
+                            </button>
+                            <button class="tool-btn" onclick="showYouTubeModal()" title="Watch YouTube">
+                                📺
+                            </button>
+                            <button class="tool-btn" onclick="togglePartyMode()" title="Party Mode">
+                                🎉
+                            </button>
+                        </div>
                         <form id="message-form" class="message-form">
                             <textarea id="message-input" class="message-input" 
                                     placeholder="Type your message... (500 chars max)" 
@@ -201,6 +225,55 @@
         </div>
     </div>
 
+    <!-- نافذة تعديل الغرفة -->
+    <div id="edit-room-modal" class="modal">
+        <div class="modal-content glass-card">
+            <span class="modal-close" onclick="hideModal('edit-room-modal')">&times;</span>
+            <h2>✏️ Edit Room</h2>
+            <div class="modal-body">
+                <input type="text" id="edit-room-name" class="modern-input" 
+                       placeholder="Room Name" maxlength="50">
+                <textarea id="edit-room-desc" class="modern-input" 
+                          placeholder="Description" maxlength="200" rows="3"></textarea>
+                <input type="password" id="edit-room-pass" class="modern-input" 
+                       placeholder="New Password (leave empty to remove)" maxlength="50">
+                <button class="modern-btn" onclick="saveRoomEdit()">
+                    Save Changes
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- نافذة رفع صورة -->
+    <div id="image-upload-modal" class="modal">
+        <div class="modal-content glass-card">
+            <span class="modal-close" onclick="hideModal('image-upload-modal')">&times;</span>
+            <h2>🖼️ Send Image</h2>
+            <div class="modal-body">
+                <input type="text" id="image-url-input" class="modern-input" 
+                       placeholder="Image URL (https://...)">
+                <button class="modern-btn" onclick="sendImageMessage()">
+                    Send Image
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- نافذة يوتيوب -->
+    <div id="youtube-modal" class="modal">
+        <div class="modal-content glass-card">
+            <span class="modal-close" onclick="hideModal('youtube-modal')">&times;</span>
+            <h2>📺 Watch YouTube Together</h2>
+            <div class="modal-body">
+                <input type="text" id="youtube-url-input" class="modern-input" 
+                       placeholder="YouTube Video URL or ID">
+                <button class="modern-btn" onclick="startYouTubeWatch()">
+                    Start Watching
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- نافذة الرسائل الخاصة -->
     <div id="private-messages-modal" class="modal">
         <div class="modal-content glass-card large-modal">
@@ -209,6 +282,7 @@
             <div class="modal-body private-chat">
                 <div class="private-users-list" id="private-users-list"></div>
                 <div class="private-messages-area">
+                    <div class="private-header" id="private-header">Select a user</div>
                     <div class="private-messages" id="private-messages"></div>
                     <div class="private-input-area">
                         <textarea id="private-message-input" class="modern-input" 
@@ -246,11 +320,19 @@
                 <div class="owner-content">
                     <!-- المكتومين -->
                     <div id="owner-muted" class="owner-tab-content active">
+                        <div class="owner-actions">
+                            <button class="modern-btn small" onclick="selectAllMuted()">Select All</button>
+                            <button class="modern-btn small" onclick="unmuteSelected()">Unmute Selected</button>
+                        </div>
                         <div id="muted-list" class="owner-list"></div>
                     </div>
 
                     <!-- المحظورين -->
                     <div id="owner-banned" class="owner-tab-content">
+                        <div class="owner-actions">
+                            <button class="modern-btn small" onclick="selectAllBanned()">Select All</button>
+                            <button class="modern-btn small" onclick="unbanSelected()">Unban Selected</button>
+                        </div>
                         <div id="banned-list" class="owner-list"></div>
                     </div>
 
@@ -266,19 +348,42 @@
                                 <label>Site Logo URL:</label>
                                 <input type="text" id="setting-logo" class="modern-input" 
                                        placeholder="https://...">
-                                <button class="modern-btn small" onclick="updateLogo()">Update</button>
+                                <button class="modern-btn small" onclick="updateLogo()">Update & Save</button>
                             </div>
                             <div class="setting-item">
                                 <label>Site Title:</label>
                                 <input type="text" id="setting-title" class="modern-input" 
                                        placeholder="Cold Room">
-                                <button class="modern-btn small" onclick="updateTitle()">Update</button>
+                                <button class="modern-btn small" onclick="updateTitle()">Update & Save</button>
                             </div>
                             <div class="setting-item">
-                                <label>Background Music URL (MP3):</label>
-                                <input type="text" id="setting-music" class="modern-input" 
+                                <label>Background Color:</label>
+                                <select id="setting-color" class="modern-input">
+                                    <option value="blue">🔵 Blue (Ice)</option>
+                                    <option value="black">⚫ Black</option>
+                                </select>
+                                <button class="modern-btn small" onclick="updateColor()">Update & Save</button>
+                            </div>
+                            <div class="setting-item">
+                                <label>Login Page Music URL (MP3):</label>
+                                <input type="text" id="setting-login-music" class="modern-input" 
                                        placeholder="https://...music.mp3">
-                                <button class="modern-btn small" onclick="updateMusic()">Update</button>
+                                <label>Volume:</label>
+                                <input type="range" id="setting-login-volume" min="0" max="1" step="0.1" value="0.5">
+                                <button class="modern-btn small" onclick="updateLoginMusic()">Update & Save</button>
+                            </div>
+                            <div class="setting-item">
+                                <label>Chat Music URL (MP3):</label>
+                                <input type="text" id="setting-chat-music" class="modern-input" 
+                                       placeholder="https://...music.mp3">
+                                <label>Volume:</label>
+                                <input type="range" id="setting-chat-volume" min="0" max="1" step="0.1" value="0.5">
+                                <button class="modern-btn small" onclick="updateChatMusic()">Update & Save</button>
+                            </div>
+                            <div class="setting-item">
+                                <button class="modern-btn" onclick="cleanAllRooms()">
+                                    🧹 Clean All Rooms
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -287,13 +392,30 @@
         </div>
     </div>
 
-    <!-- قائمة الإجراءات -->
+    <!-- قائمة الإجراءات الثابتة -->
     <div id="message-actions-menu" class="actions-menu glass-card" style="display: none;">
         <div class="actions-menu-header">⚙️ Actions</div>
         <div id="message-actions-list"></div>
     </div>
 
+    <!-- تأكيد الحذف -->
+    <div id="confirm-modal" class="modal">
+        <div class="modal-content glass-card" style="max-width: 400px;">
+            <h2>⚠️ Confirm</h2>
+            <p id="confirm-message" style="margin: 1.5rem 0;"></p>
+            <div style="display: flex; gap: 1rem;">
+                <button class="modern-btn" onclick="confirmAction(true)" style="flex: 1;">
+                    Yes
+                </button>
+                <button class="modern-btn" onclick="confirmAction(false)" style="flex: 1; background: #6b7280;">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- السكريبتات -->
+    <script src="https://www.youtube.com/iframe_api"></script>
     <script src="/socket.io/socket.io.js"></script>
     <script src="script.js"></script>
 </body>
