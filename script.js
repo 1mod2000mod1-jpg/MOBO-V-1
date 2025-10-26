@@ -1,5 +1,5 @@
-// Cold Room Chat System - Client Side
-console.log('❄️ Cold Room loading...');
+// Cold Room Chat System V2 - Complete Client
+console.log('❄️ Cold Room V2 loading...');
 
 let socket = null;
 let currentUser = null;
@@ -8,10 +8,18 @@ let systemSettings = {};
 let selectedUserId = null;
 let selectedUsername = null;
 let currentPrivateChatUser = null;
+let selectedMuted = [];
+let selectedBanned = [];
+let confirmCallback = null;
+let editingRoomId = null;
+let ytPlayer = null;
 
-// التهيئة
+// ═══════════════════════════════════════════════════════════════
+// التهيئة والاتصال
+// ═══════════════════════════════════════════════════════════════
+
 function initializeSocket() {
-    console.log('Connecting to server...');
+    console.log('Connecting...');
     
     socket = io({
         transports: ['websocket', 'polling'],
@@ -65,11 +73,18 @@ function setupSocketListeners() {
         scrollToBottom();
     });
 
+    socket.on('message-edited', (data) => {
+        const msgEl = document.querySelector(`[data-message-id="${data.messageId}"] .message-text`);
+        if (msgEl) {
+            msgEl.textContent = data.newText + ' (edited)';
+        }
+    });
+
     socket.on('new-private-message', (message) => {
         if (currentPrivateChatUser === message.from) {
             addPrivateMessage(message);
         }
-        showNotification(`New private message from ${message.fromName}`);
+        showNotification(`New message from ${message.fromName}`);
     });
 
     socket.on('private-message-sent', (message) => {
@@ -77,7 +92,7 @@ function setupSocketListeners() {
     });
 
     socket.on('private-messages-list', (data) => {
-        displayPrivateMessages(data.messages);
+        displayPrivateMessages(data.messages, data.withUserId);
     });
 
     socket.on('room-joined', (data) => {
@@ -88,6 +103,13 @@ function setupSocketListeners() {
         showAlert('Room created', 'success');
         socket.emit('join-room', { roomId: data.roomId });
         hideModal('create-room-modal');
+    });
+
+    socket.on('room-updated', (data) => {
+        if (socket.currentRoom === editingRoomId) {
+            document.getElementById('room-info').textContent = data.name;
+        }
+        showNotification('Room updated');
     });
 
     socket.on('users-list', updateUsersList);
@@ -120,6 +142,20 @@ function setupSocketListeners() {
     socket.on('room-deleted', (data) => {
         showAlert(data.message, 'error');
         socket.emit('join-room', { roomId: 'global_cold' });
+    });
+
+    socket.on('party-mode-changed', (data) => {
+        togglePartyEffects(data.enabled);
+        showNotification(data.enabled ? '🎉 Party Mode ON!' : 'Party Mode OFF');
+    });
+
+    socket.on('youtube-started', (data) => {
+        showYouTubePlayer(data.videoId);
+        showNotification(`${data.startedBy} started a video`);
+    });
+
+    socket.on('youtube-stopped', () => {
+        hideYouTubePlayer();
     });
 
     socket.on('action-success', (message) => {
@@ -167,7 +203,10 @@ function setupSocketListeners() {
     });
 }
 
-// تسجيل الدخول
+// ═══════════════════════════════════════════════════════════════
+// تسجيل الدخول والتسجيل
+// ═══════════════════════════════════════════════════════════════
+
 function handleLoginSuccess(data) {
     currentUser = data.user;
     currentRoom = data.room.id;
@@ -179,6 +218,10 @@ function handleLoginSuccess(data) {
 
     document.getElementById('login-screen').classList.remove('active');
     document.getElementById('chat-screen').classList.add('active');
+
+    // إيقاف موسيقى التسجيل وتشغيل موسيقى الشات
+    stopLoginMusic();
+    playChat Music();
 
     hideLoading();
     showAlert(`Welcome ${currentUser.displayName}!`, 'success');
@@ -194,6 +237,11 @@ function handleLoginSuccess(data) {
 
     if (currentUser.isOwner) {
         document.getElementById('owner-panel-btn').style.display = 'inline-block';
+        document.getElementById('owner-tools').style.display = 'flex';
+    }
+
+    if (data.room.partyMode) {
+        togglePartyEffects(true);
     }
 
     applySiteSettings();
@@ -212,11 +260,16 @@ function handleRoomJoined(data) {
     document.getElementById('message-input').disabled = false;
     document.querySelector('#message-form button').disabled = false;
     
+    if (data.room.partyMode) {
+        togglePartyEffects(true);
+    } else {
+        togglePartyEffects(false);
+    }
+    
     socket.emit('get-users', { roomId: currentRoom });
     scrollToBottom();
 }
 
-// تسجيل الدخول والتسجيل
 window.login = function() {
     const username = document.getElementById('login-username').value.trim();
     const password = document.getElementById('login-password').value.trim();
@@ -234,24 +287,25 @@ window.register = function() {
     const username = document.getElementById('register-username').value.trim();
     const password = document.getElementById('register-password').value.trim();
     const displayName = document.getElementById('register-displayname').value.trim();
+    const gender = document.getElementById('register-gender').value;
 
-    if (!username || !password || !displayName) {
+    if (!username || !password || !displayName || !gender) {
         showAlert('Please fill all fields', 'error');
         return;
     }
 
     if (username.length < 3 || username.length > 20) {
-        showAlert('Username must be 3-20 characters', 'error');
+        showAlert('Username: 3-20 characters', 'error');
         return;
     }
 
     if (password.length < 6) {
-        showAlert('Password must be 6+ characters', 'error');
+        showAlert('Password: 6+ characters', 'error');
         return;
     }
 
     showLoading('Creating account...');
-    socket.emit('register', { username, password, displayName });
+    socket.emit('register', { username, password, displayName, gender });
 };
 
 window.sendSupportMessage = function() {
@@ -278,7 +332,10 @@ window.logout = function(forced = false) {
     }
 };
 
-// إرسال الرسائل
+// ═══════════════════════════════════════════════════════════════
+// إرسال وتعديل الرسائل
+// ═══════════════════════════════════════════════════════════════
+
 document.addEventListener('DOMContentLoaded', function() {
     const messageForm = document.getElementById('message-form');
     if (messageForm) {
@@ -313,7 +370,37 @@ function sendMessage() {
     textarea.value = '';
 }
 
+function editMessage(messageId, currentText) {
+    const newText = prompt('Edit message:', currentText);
+    if (newText && newText.trim() !== currentText) {
+        socket.emit('edit-message', {
+            messageId: messageId,
+            newText: newText.trim()
+        });
+    }
+}
+
+window.showImageUpload = function() {
+    document.getElementById('image-upload-modal').classList.add('active');
+};
+
+window.sendImageMessage = function() {
+    const imageUrl = document.getElementById('image-url-input').value.trim();
+    
+    if (!imageUrl) {
+        showAlert('Enter image URL', 'error');
+        return;
+    }
+
+    socket.emit('send-image', { imageUrl: imageUrl });
+    document.getElementById('image-url-input').value = '';
+    hideModal('image-upload-modal');
+};
+
+// ═══════════════════════════════════════════════════════════════
 // عرض الرسائل
+// ═══════════════════════════════════════════════════════════════
+
 function addMessage(message) {
     const container = document.getElementById('messages');
     if (!container) return;
@@ -332,25 +419,44 @@ function addMessage(message) {
         badges += '<span class="badge moderator-badge">⭐</span>';
     }
 
-    messageDiv.innerHTML = `
-        <div class="message-header">
-            <div>
-                <span class="message-user">${escapeHtml(message.avatar)} ${escapeHtml(message.username)}</span>
-                ${badges}
+    if (message.isImage) {
+        messageDiv.innerHTML = `
+            <div class="message-header">
+                <div>
+                    <span class="message-user">${escapeHtml(message.avatar)} ${escapeHtml(message.username)}</span>
+                    ${badges}
+                </div>
             </div>
-        </div>
-        <div class="message-text">${escapeHtml(message.text)}</div>
-        <div class="message-footer">
-            <span class="message-time">${message.timestamp}</span>
-        </div>
-    `;
+            <div class="message-image">
+                <img src="${escapeHtml(message.imageUrl)}" alt="Image" style="max-width: 300px; border-radius: 10px;">
+            </div>
+            <div class="message-footer">
+                <span class="message-time">${message.timestamp}</span>
+            </div>
+        `;
+    } else {
+        messageDiv.innerHTML = `
+            <div class="message-header">
+                <div>
+                    <span class="message-user">${escapeHtml(message.avatar)} ${escapeHtml(message.username)}</span>
+                    ${badges}
+                </div>
+            </div>
+            <div class="message-text">${escapeHtml(message.text)}${message.edited ? ' <small>(edited)</small>' : ''}</div>
+            <div class="message-footer">
+                <span class="message-time">${message.timestamp}</span>
+            </div>
+        `;
+    }
 
-    if (message.userId !== currentUser?.id) {
+    if (message.userId !== currentUser?.id || currentUser?.isOwner) {
         messageDiv.style.cursor = 'pointer';
-        messageDiv.addEventListener('click', () => {
-            selectedUserId = message.userId;
-            selectedUsername = message.username;
-            showMessageActions(message);
+        messageDiv.addEventListener('click', (e) => {
+            if (!e.target.closest('.badge')) {
+                selectedUserId = message.userId;
+                selectedUsername = message.username;
+                showMessageActions(message);
+            }
         });
     }
 
@@ -361,23 +467,35 @@ function addMessage(message) {
 function showMessageActions(message) {
     const actions = [];
 
-    // خيار تغيير الاسم للمستخدم نفسه
-    if (message.userId === currentUser?.id) {
-        actions.push({ text: '✏️ Change My Name', action: () => changeName() });
+    // للمستخدم نفسه
+    if (message.userId === currentUser?.id && !message.isImage) {
+        actions.push({ 
+            text: '✏️ Edit My Message', 
+            action: () => editMessage(message.id, message.text)
+        });
     }
 
     // خيارات المالك
     if (currentUser?.isOwner) {
-        actions.push({ text: '👑 Add Moderator', action: () => addModerator() });
-        actions.push({ text: '🔇 Mute', action: () => muteUser() });
-        actions.push({ text: '🚫 Ban', action: () => banUser() });
-        actions.push({ text: '🗑️ Delete Account', action: () => deleteAccount() });
+        if (message.userId !== currentUser.id) {
+            actions.push({ text: '👑 Add Moderator', action: () => addModerator() });
+            actions.push({ text: '⭐ Remove Moderator', action: () => removeModerator() });
+            actions.push({ text: '🔇 Mute', action: () => showMuteDialog() });
+            actions.push({ text: '🚫 Ban', action: () => banUser() });
+            actions.push({ text: '🗑️ Delete Account', action: () => deleteAccount() });
+        }
         actions.push({ text: '❌ Delete Message', action: () => deleteMessage(message.id) });
-    } else if (currentUser?.isModerator) {
-        actions.push({ text: '🔇 Mute', action: () => muteUser() });
+    } 
+    // خيارات المشرفين
+    else if (currentUser?.isModerator && message.userId !== currentUser.id) {
+        actions.push({ text: '🔇 Mute', action: () => showMuteDialog() });
     }
 
-    actions.push({ text: '💬 Private Message', action: () => openPrivateChat(selectedUserId) });
+    // للجميع
+    if (message.userId !== currentUser?.id) {
+        actions.push({ text: '💬 Private Message', action: () => openPrivateChat(selectedUserId) });
+    }
+
     actions.push({ text: '❌ Cancel', action: () => {} });
 
     showActionsMenu(actions);
@@ -400,11 +518,16 @@ function showActionsMenu(actions) {
         list.appendChild(btn);
     });
 
-    menu.style.display = 'block';
+    // وضع القائمة في المنتصف بشكل ثابت
+    menu.style.display = 'flex';
+    menu.style.position = 'fixed';
+    menu.style.top = '50%';
+    menu.style.left = '50%';
+    menu.style.transform = 'translate(-50%, -50%)';
 
     setTimeout(() => {
         document.addEventListener('click', function closeMenu(e) {
-            if (!menu.contains(e.target)) {
+            if (!menu.contains(e.target) && !e.target.closest('.message')) {
                 menu.style.display = 'none';
                 document.removeEventListener('click', closeMenu);
             }
@@ -412,48 +535,56 @@ function showActionsMenu(actions) {
     }, 100);
 }
 
+// ═══════════════════════════════════════════════════════════════
 // إجراءات المستخدمين
-window.changeName = function() {
-    const newName = prompt('Enter new display name:', currentUser.displayName);
-    if (newName && newName.trim()) {
-        socket.emit('change-display-name', { newName: newName.trim() });
-    }
-};
+// ═══════════════════════════════════════════════════════════════
 
-window.muteUser = function() {
-    const duration = prompt(`Mute duration for ${selectedUsername} (minutes, 0=permanent):`, '10');
+window.showMuteDialog = function() {
+    const duration = prompt(`Mute duration for ${selectedUsername} (minutes, 0 = permanent):`, '10');
     if (duration === null) return;
     
+    const isPermanent = parseInt(duration) === 0;
     const reason = prompt('Reason:', 'Rule violation');
     if (!reason) return;
 
     socket.emit('mute-user', {
         userId: selectedUserId,
         username: selectedUsername,
-        duration: parseInt(duration),
-        reason: reason
+        duration: parseInt(duration) || 0,
+        reason: reason,
+        roomId: currentRoom
     });
 };
 
 window.banUser = function() {
-    if (!confirm(`Ban ${selectedUsername} permanently?`)) return;
-    
-    const reason = prompt('Reason:', 'Serious violation');
-    if (!reason) return;
-
-    socket.emit('ban-user', {
-        userId: selectedUserId,
-        username: selectedUsername,
-        reason: reason
-    });
+    showConfirm(
+        `Ban ${selectedUsername} permanently?\n\nThis will:\n- Ban their IP address\n- Kick them immediately\n- They cannot rejoin`,
+        (confirmed) => {
+            if (confirmed) {
+                const reason = prompt('Reason:', 'Serious violation');
+                if (reason) {
+                    socket.emit('ban-user', {
+                        userId: selectedUserId,
+                        username: selectedUsername,
+                        reason: reason
+                    });
+                }
+            }
+        }
+    );
 };
 
 window.deleteAccount = function() {
-    if (!confirm(`Delete account ${selectedUsername} permanently?`)) return;
-
-    socket.emit('delete-account', {
-        userId: selectedUserId
-    });
+    showConfirm(
+        `DELETE account ${selectedUsername} permanently?\n\nThis will:\n- Delete all their messages\n- Remove them from all rooms\n- Delete account permanently\n\nThis action CANNOT be undone!`,
+        (confirmed) => {
+            if (confirmed) {
+                socket.emit('delete-account', {
+                    userId: selectedUserId
+                });
+            }
+        }
+    );
 };
 
 window.addModerator = function() {
@@ -466,29 +597,66 @@ window.addModerator = function() {
     });
 };
 
-function deleteMessage(messageId) {
-    if (!confirm('Delete this message?')) return;
+window.removeModerator = function() {
+    if (!confirm(`Remove ${selectedUsername} from moderators?`)) return;
     
+    socket.emit('remove-moderator', {
+        userId: selectedUserId,
+        username: selectedUsername,
+        roomId: currentRoom
+    });
+};
+
+function deleteMessage(messageId) {
     socket.emit('delete-message', {
         messageId: messageId,
         roomId: currentRoom
     });
 }
 
+function openPrivateChat(userId) {
+    currentPrivateChatUser = userId;
+    socket.emit('get-private-messages', { withUserId: userId });
+    document.getElementById('private-messages-modal').classList.add('active');
+    
+    const user = Array.from(document.querySelectorAll('.user-item'))
+        .find(el => el.dataset.userId === userId);
+    
+    if (user) {
+        document.getElementById('private-header').textContent = `Chat with ${user.dataset.userName}`;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // الرسائل الخاصة
+// ═══════════════════════════════════════════════════════════════
+
 window.showPrivateMessages = function() {
     document.getElementById('private-messages-modal').classList.add('active');
     loadPrivateUsersList();
 };
 
 function loadPrivateUsersList() {
+    const container = document.getElementById('private-users-list');
     socket.emit('get-users', { roomId: currentRoom });
-}
-
-function openPrivateChat(userId) {
-    currentPrivateChatUser = userId;
-    socket.emit('get-private-messages', { withUserId: userId });
-    document.getElementById('private-messages-modal').classList.add('active');
+    
+    socket.once('users-list', (users) => {
+        container.innerHTML = '';
+        users.forEach(user => {
+            if (user.id === currentUser?.id) return;
+            
+            const div = document.createElement('div');
+            div.className = 'private-user-item';
+            div.dataset.userId = user.id;
+            div.dataset.userName = user.displayName;
+            div.innerHTML = `
+                <span>${user.avatar}</span>
+                <span>${escapeHtml(user.displayName)}</span>
+            `;
+            div.onclick = () => openPrivateChat(user.id);
+            container.appendChild(div);
+        });
+    });
 }
 
 window.sendPrivateMessage = function() {
@@ -505,7 +673,7 @@ window.sendPrivateMessage = function() {
     input.value = '';
 };
 
-function displayPrivateMessages(messages) {
+function displayPrivateMessages(messages, withUserId) {
     const container = document.getElementById('private-messages');
     if (!container) return;
 
@@ -513,12 +681,13 @@ function displayPrivateMessages(messages) {
 
     messages.forEach(msg => {
         const div = document.createElement('div');
-        div.className = 'message';
+        const isFromMe = msg.from === currentUser?.id;
+        div.className = `message ${isFromMe ? 'my-message' : ''}`;
         div.innerHTML = `
             <div class="message-header">
                 <span class="message-user">${escapeHtml(msg.fromName)}</span>
             </div>
-            <div class="message-text">${escapeHtml(msg.text)}</div>
+            <div class="message-text">${escapeHtml(msg.text)}${msg.edited ? ' <small>(edited)</small>' : ''}</div>
             <div class="message-footer">
                 <span class="message-time">${msg.timestamp}</span>
             </div>
@@ -533,8 +702,9 @@ function addPrivateMessage(message) {
     const container = document.getElementById('private-messages');
     if (!container) return;
 
+    const isFromMe = message.from === currentUser?.id;
     const div = document.createElement('div');
-    div.className = 'message';
+    div.className = `message ${isFromMe ? 'my-message' : ''}`;
     div.innerHTML = `
         <div class="message-header">
             <span class="message-user">${escapeHtml(message.fromName)}</span>
@@ -548,7 +718,13 @@ function addPrivateMessage(message) {
     container.scrollTop = container.scrollHeight;
 }
 
+// سأكمل في الرد التالي مع بقية الوظائف...
+// Cold Room V2 - Part 2: Rooms, Settings, Effects
+
+// ═══════════════════════════════════════════════════════════════
 // إدارة الغرف
+// ═══════════════════════════════════════════════════════════════
+
 window.showCreateRoomModal = function() {
     document.getElementById('create-room-modal').classList.add('active');
 };
@@ -571,9 +747,17 @@ window.createRoom = function() {
 };
 
 window.joinRoom = function(roomId) {
-    showLoading('Joining...');
-    socket.emit('join-room', { roomId: roomId });
-    setTimeout(() => hideLoading(), 1000);
+    const room = Array.from(document.querySelectorAll('.room-item'))
+        .find(el => el.dataset.roomId === roomId);
+    
+    if (room && room.dataset.hasPassword === 'true') {
+        const password = prompt('Enter room password:');
+        if (password) {
+            socket.emit('join-room', { roomId: roomId, password: password });
+        }
+    } else {
+        socket.emit('join-room', { roomId: roomId });
+    }
 };
 
 window.toggleRoomsList = function() {
@@ -601,6 +785,8 @@ function updateRoomsList(rooms) {
     rooms.forEach(room => {
         const div = document.createElement('div');
         div.className = 'room-item';
+        div.dataset.roomId = room.id;
+        div.dataset.hasPassword = room.hasPassword;
         
         const lock = room.hasPassword ? '🔒 ' : '';
         const official = room.isOfficial ? '⭐ ' : '';
@@ -616,33 +802,71 @@ function updateRoomsList(rooms) {
 
         div.onclick = () => joinRoom(room.id);
 
-        // إضافة خيارات للمالك عند الضغط المطول
-        if (currentUser?.isOwner && !room.isOfficial) {
-            div.addEventListener('contextmenu', (e) => {
-                e.preventDefault();
-                showRoomActions(room.id);
+        // خيارات المالك بالضغط الطويل
+        if (currentUser?.isOwner) {
+            let pressTimer;
+            div.addEventListener('mousedown', (e) => {
+                pressTimer = setTimeout(() => showRoomActions(room.id, room.name, room.isOfficial), 500);
             });
+            div.addEventListener('mouseup', () => clearTimeout(pressTimer));
+            div.addEventListener('mouseleave', () => clearTimeout(pressTimer));
+            
+            // للجوال
+            div.addEventListener('touchstart', (e) => {
+                pressTimer = setTimeout(() => {
+                    e.preventDefault();
+                    showRoomActions(room.id, room.name, room.isOfficial);
+                }, 500);
+            });
+            div.addEventListener('touchend', () => clearTimeout(pressTimer));
         }
 
         container.appendChild(div);
     });
 }
 
-function showRoomActions(roomId) {
+function showRoomActions(roomId, roomName, isOfficial) {
     const actions = [
+        { text: '✏️ Edit Room', action: () => showEditRoomModal(roomId) },
         { text: '🔇 Silence Room', action: () => silenceRoom(roomId) },
         { text: '🔊 Unsilence Room', action: () => unsilenceRoom(roomId) },
-        { text: '🧹 Clean Chat', action: () => cleanChat(roomId) },
-        { text: '🗑️ Delete Room', action: () => deleteRoom(roomId) },
-        { text: '❌ Cancel', action: () => {} }
+        { text: '🧹 Clean Chat', action: () => cleanChat(roomId) }
     ];
+
+    if (!isOfficial) {
+        actions.push({ text: '🗑️ Delete Room', action: () => deleteRoom(roomId, roomName) });
+    }
+
+    actions.push({ text: '❌ Cancel', action: () => {} });
+
     showActionsMenu(actions);
 }
 
+function showEditRoomModal(roomId) {
+    editingRoomId = roomId;
+    document.getElementById('edit-room-modal').classList.add('active');
+}
+
+window.saveRoomEdit = function() {
+    const name = document.getElementById('edit-room-name').value.trim();
+    const description = document.getElementById('edit-room-desc').value.trim();
+    const password = document.getElementById('edit-room-pass').value.trim();
+
+    socket.emit('update-room', {
+        roomId: editingRoomId,
+        name: name,
+        description: description,
+        password: password || null
+    });
+
+    hideModal('edit-room-modal');
+    document.getElementById('edit-room-name').value = '';
+    document.getElementById('edit-room-desc').value = '';
+    document.getElementById('edit-room-pass').value = '';
+};
+
 function silenceRoom(roomId) {
-    if (confirm('Silence this room?')) {
-        socket.emit('silence-room', { roomId: roomId });
-    }
+    socket.emit('silence-room', { roomId: roomId });
 }
 
 function unsilenceRoom(roomId) {
@@ -650,15 +874,19 @@ function unsilenceRoom(roomId) {
 }
 
 function cleanChat(roomId) {
-    if (confirm('Clean all messages in this room?')) {
-        socket.emit('clean-chat', { roomId: roomId });
-    }
+    showConfirm('Clean all messages in this room?', (confirmed) => {
+        if (confirmed) {
+            socket.emit('clean-chat', { roomId: roomId });
+        }
+    });
 }
 
-function deleteRoom(roomId) {
-    if (confirm('Delete this room permanently?')) {
-        socket.emit('delete-room', { roomId: roomId });
-    }
+function deleteRoom(roomId, roomName) {
+    showConfirm(`Delete room "${roomName}" permanently?`, (confirmed) => {
+        if (confirmed) {
+            socket.emit('delete-room', { roomId: roomId });
+        }
+    });
 }
 
 function updateUsersList(users) {
@@ -673,6 +901,8 @@ function updateUsersList(users) {
 
         const div = document.createElement('div');
         div.className = 'user-item';
+        div.dataset.userId = user.id;
+        div.dataset.userName = user.displayName;
 
         let badges = '';
         if (user.isOwner) badges += '<span class="badge owner-badge">👑</span>';
@@ -711,7 +941,10 @@ function updateUserBadges() {
     container.innerHTML = badges;
 }
 
+// ═══════════════════════════════════════════════════════════════
 // لوحة المالك
+// ═══════════════════════════════════════════════════════════════
+
 window.showOwnerPanel = function() {
     document.getElementById('owner-panel-modal').classList.add('active');
     switchOwnerTab('muted');
@@ -744,6 +977,7 @@ function displayMutedList(list) {
     if (!container) return;
 
     container.innerHTML = '';
+    selectedMuted = [];
 
     if (list.length === 0) {
         container.innerHTML = '<div style="text-align: center; padding: 2rem;">No muted users</div>';
@@ -760,6 +994,8 @@ function displayMutedList(list) {
         div.innerHTML = `
             <div class="owner-item-header">
                 <div>
+                    <input type="checkbox" class="muted-checkbox" data-user-id="${item.userId}" 
+                           style="margin-right: 10px;">
                     <strong>${escapeHtml(item.username)}</strong><br>
                     <small>By: ${escapeHtml(item.mutedBy)}</small>
                 </div>
@@ -782,6 +1018,7 @@ function displayBannedList(list) {
     if (!container) return;
 
     container.innerHTML = '';
+    selectedBanned = [];
 
     if (list.length === 0) {
         container.innerHTML = '<div style="text-align: center; padding: 2rem;">No banned users</div>';
@@ -795,6 +1032,8 @@ function displayBannedList(list) {
         div.innerHTML = `
             <div class="owner-item-header">
                 <div>
+                    <input type="checkbox" class="banned-checkbox" data-user-id="${item.userId}" 
+                           style="margin-right: 10px;">
                     <strong>${escapeHtml(item.username)}</strong><br>
                     <small>By: ${escapeHtml(item.bannedBy)}</small>
                 </div>
@@ -846,31 +1085,75 @@ function displaySupportMessages(messages) {
     });
 }
 
-window.unmute = function(userId) {
-    if (confirm('Unmute this user?')) {
-        socket.emit('unmute-user', { userId: userId });
-        setTimeout(() => socket.emit('get-muted-list'), 500);
+window.selectAllMuted = function() {
+    document.querySelectorAll('.muted-checkbox').forEach(cb => cb.checked = true);
+};
+
+window.selectAllBanned = function() {
+    document.querySelectorAll('.banned-checkbox').forEach(cb => cb.checked = true);
+};
+
+window.unmuteSelected = function() {
+    const selected = Array.from(document.querySelectorAll('.muted-checkbox:checked'))
+        .map(cb => cb.dataset.userId);
+    
+    if (selected.length === 0) {
+        showAlert('Select users first', 'error');
+        return;
     }
+
+    showConfirm(`Unmute ${selected.length} users?`, (confirmed) => {
+        if (confirmed) {
+            socket.emit('unmute-multiple', { userIds: selected });
+            setTimeout(() => socket.emit('get-muted-list'), 500);
+        }
+    });
+};
+
+window.unbanSelected = function() {
+    const selected = Array.from(document.querySelectorAll('.banned-checkbox:checked'))
+        .map(cb => cb.dataset.userId);
+    
+    if (selected.length === 0) {
+        showAlert('Select users first', 'error');
+        return;
+    }
+
+    showConfirm(`Unban ${selected.length} users?`, (confirmed) => {
+        if (confirmed) {
+            socket.emit('unban-multiple', { userIds: selected });
+            setTimeout(() => socket.emit('get-banned-list'), 500);
+        }
+    });
+};
+
+window.unmute = function(userId) {
+    socket.emit('unmute-user', { userId: userId });
+    setTimeout(() => socket.emit('get-muted-list'), 500);
 };
 
 window.unban = function(userId) {
-    if (confirm('Unban this user?')) {
-        socket.emit('unban-user', { userId: userId });
-        setTimeout(() => socket.emit('get-banned-list'), 500);
-    }
+    socket.emit('unban-user', { userId: userId });
+    setTimeout(() => socket.emit('get-banned-list'), 500);
 };
 
 window.deleteSupportMessage = function(messageId) {
-    if (confirm('Delete this message?')) {
-        socket.emit('delete-support-message', { messageId: messageId });
-        setTimeout(() => socket.emit('get-support-messages'), 500);
-    }
+    socket.emit('delete-support-message', { messageId: messageId });
+    setTimeout(() => socket.emit('get-support-messages'), 500);
 };
+
+// ═══════════════════════════════════════════════════════════════
+// الإعدادات
+// ═══════════════════════════════════════════════════════════════
 
 function loadSettings() {
     document.getElementById('setting-logo').value = systemSettings.siteLogo || '';
     document.getElementById('setting-title').value = systemSettings.siteTitle || '';
-    document.getElementById('setting-music').value = systemSettings.backgroundMusic || '';
+    document.getElementById('setting-color').value = systemSettings.backgroundColor || 'blue';
+    document.getElementById('setting-login-music').value = systemSettings.loginMusic || '';
+    document.getElementById('setting-chat-music').value = systemSettings.chatMusic || '';
+    document.getElementById('setting-login-volume').value = systemSettings.loginMusicVolume || 0.5;
+    document.getElementById('setting-chat-volume').value = systemSettings.chatMusicVolume || 0.5;
 }
 
 window.updateLogo = function() {
@@ -891,9 +1174,35 @@ window.updateTitle = function() {
     socket.emit('update-settings', { siteTitle: title });
 };
 
-window.updateMusic = function() {
-    const music = document.getElementById('setting-music').value.trim();
-    socket.emit('update-settings', { backgroundMusic: music });
+window.updateColor = function() {
+    const color = document.getElementById('setting-color').value;
+    socket.emit('update-settings', { backgroundColor: color });
+};
+
+window.updateLoginMusic = function() {
+    const music = document.getElementById('setting-login-music').value.trim();
+    const volume = parseFloat(document.getElementById('setting-login-volume').value);
+    socket.emit('update-settings', { 
+        loginMusic: music,
+        loginMusicVolume: volume
+    });
+};
+
+window.updateChatMusic = function() {
+    const music = document.getElementById('setting-chat-music').value.trim();
+    const volume = parseFloat(document.getElementById('setting-chat-volume').value);
+    socket.emit('update-settings', { 
+        chatMusic: music,
+        chatMusicVolume: volume
+    });
+};
+
+window.cleanAllRooms = function() {
+    showConfirm('Clean ALL messages in ALL rooms?\n\nThis cannot be undone!', (confirmed) => {
+        if (confirmed) {
+            socket.emit('clean-all-rooms');
+        }
+    });
 };
 
 function applySiteSettings() {
@@ -911,18 +1220,180 @@ function applySiteSettings() {
     document.getElementById('main-title').textContent = systemSettings.siteTitle;
     document.getElementById('header-title').textContent = systemSettings.siteTitle;
 
-    // تشغيل الموسيقى
-    const audio = document.getElementById('background-music');
-    if (systemSettings.backgroundMusic) {
-        audio.src = systemSettings.backgroundMusic;
-        audio.play().catch(() => {});
+    // تطبيق اللون
+    if (systemSettings.backgroundColor === 'black') {
+        document.body.classList.add('black-theme');
     } else {
-        audio.pause();
-        audio.src = '';
+        document.body.classList.remove('black-theme');
+    }
+
+    // تشغيل الموسيقى
+    updateMusicPlayers();
+}
+
+function updateMusicPlayers() {
+    const loginMusic = document.getElementById('login-music');
+    const chatMusic = document.getElementById('chat-music');
+
+    if (systemSettings.loginMusic) {
+        loginMusic.src = systemSettings.loginMusic;
+        loginMusic.volume = systemSettings.loginMusicVolume || 0.5;
+    }
+
+    if (systemSettings.chatMusic) {
+        chatMusic.src = systemSettings.chatMusic;
+        chatMusic.volume = systemSettings.chatMusicVolume || 0.5;
     }
 }
 
-// النوافذ
+function playLoginMusic() {
+    const audio = document.getElementById('login-music');
+    if (audio.src) {
+        audio.play().catch(() => {
+            // المتصفح منع التشغيل التلقائي - سيعمل بعد أول تفاعل
+        });
+    }
+}
+
+function stopLoginMusic() {
+    const audio = document.getElementById('login-music');
+    audio.pause();
+}
+
+function playChatMusic() {
+    const audio = document.getElementById('chat-music');
+    if (audio.src) {
+        audio.play().catch(() => {});
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// وضع الحفلة
+// ═══════════════════════════════════════════════════════════════
+
+window.togglePartyMode = function() {
+    const enabled = !document.body.classList.contains('party-mode');
+    socket.emit('toggle-party-mode', {
+        roomId: currentRoom,
+        enabled: enabled
+    });
+};
+
+function togglePartyEffects(enabled) {
+    if (enabled) {
+        document.body.classList.add('party-mode');
+        createPartyLights();
+    } else {
+        document.body.classList.remove('party-mode');
+        removePartyLights();
+    }
+}
+
+function createPartyLights() {
+    let container = document.getElementById('party-lights');
+    if (container) return;
+
+    container = document.createElement('div');
+    container.id = 'party-lights';
+    container.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 1;
+    `;
+
+    const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff'];
+    
+    for (let i = 0; i < 20; i++) {
+        const light = document.createElement('div');
+        light.style.cssText = `
+            position: absolute;
+            width: ${Math.random() * 100 + 50}px;
+            height: ${Math.random() * 100 + 50}px;
+            background: radial-gradient(circle, ${colors[Math.floor(Math.random() * colors.length)]} 0%, transparent 70%);
+            border-radius: 50%;
+            top: ${Math.random() * 100}%;
+            left: ${Math.random() * 100}%;
+            animation: partyFloat ${Math.random() * 3 + 2}s infinite ease-in-out;
+            opacity: 0.6;
+        `;
+        container.appendChild(light);
+    }
+
+    document.body.appendChild(container);
+}
+
+function removePartyLights() {
+    const container = document.getElementById('party-lights');
+    if (container) container.remove();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// يوتيوب
+// ═══════════════════════════════════════════════════════════════
+
+window.showYouTubeModal = function() {
+    document.getElementById('youtube-modal').classList.add('active');
+};
+
+window.startYouTubeWatch = function() {
+    const input = document.getElementById('youtube-url-input').value.trim();
+    if (!input) {
+        showAlert('Enter YouTube URL or ID', 'error');
+        return;
+    }
+
+    let videoId = input;
+    if (input.includes('youtube.com') || input.includes('youtu.be')) {
+        const match = input.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&]+)/);
+        if (match) videoId = match[1];
+    }
+
+    socket.emit('start-youtube-watch', { videoId: videoId });
+    hideModal('youtube-modal');
+    document.getElementById('youtube-url-input').value = '';
+};
+
+function showYouTubePlayer(videoId) {
+    const container = document.getElementById('youtube-player-container');
+    container.style.display = 'block';
+
+    if (!ytPlayer) {
+        ytPlayer = new YT.Player('youtube-player', {
+            height: '360',
+            width: '640',
+            videoId: videoId,
+            events: {
+                'onReady': (event) => event.target.playVideo()
+            }
+        });
+    } else {
+        ytPlayer.loadVideoById(videoId);
+    }
+}
+
+function hideYouTubePlayer() {
+    const container = document.getElementById('youtube-player-container');
+    container.style.display = 'none';
+    if (ytPlayer) {
+        ytPlayer.stopVideo();
+    }
+}
+
+window.closeYouTube = function() {
+    if (currentUser?.isOwner) {
+        socket.emit('stop-youtube-watch');
+    }
+    hideYouTubePlayer();
+};
+
+// ═══════════════════════════════════════════════════════════════
+// الدوال المساعدة
+// ═══════════════════════════════════════════════════════════════
+
 window.hideModal = function(modalId) {
     document.getElementById(modalId).classList.remove('active');
 };
@@ -949,7 +1420,6 @@ function scrollToBottom() {
     }
 }
 
-// الدوال المساعدة
 function escapeHtml(text) {
     if (!text) return '';
     const div = document.createElement('div');
@@ -966,6 +1436,7 @@ function showAlert(message, type = 'info') {
     };
     
     const alertDiv = document.createElement('div');
+    alertDiv.className = 'custom-alert';
     alertDiv.style.cssText = `
         position: fixed;
         top: 20px;
@@ -1047,6 +1518,20 @@ function hideLoading() {
     if (div) div.remove();
 }
 
+function showConfirm(message, callback) {
+    confirmCallback = callback;
+    document.getElementById('confirm-message').textContent = message;
+    document.getElementById('confirm-modal').classList.add('active');
+}
+
+window.confirmAction = function(confirmed) {
+    hideModal('confirm-modal');
+    if (confirmCallback) {
+        confirmCallback(confirmed);
+        confirmCallback = null;
+    }
+};
+
 function startHeartbeat() {
     setInterval(() => {
         if (socket && socket.connected) {
@@ -1055,7 +1540,10 @@ function startHeartbeat() {
     }, 30000);
 }
 
-// تساقط الثلوج
+// ═══════════════════════════════════════════════════════════════
+// التأثيرات البصرية
+// ═══════════════════════════════════════════════════════════════
+
 function createSnowfall() {
     const container = document.getElementById('snowflakes');
     if (!container) return;
@@ -1076,7 +1564,6 @@ function createSnowfall() {
     }
 }
 
-// رسم رجل الثلج
 function drawSnowman() {
     const canvas = document.getElementById('snowman-canvas');
     if (!canvas) return;
@@ -1085,10 +1572,10 @@ function drawSnowman() {
     canvas.width = 200;
     canvas.height = 250;
 
-    // الجسم
+    ctx.globalAlpha = 0.4; // شفافية أقل
+
     ctx.fillStyle = 'white';
     
-    // الكرة السفلية
     ctx.beginPath();
     ctx.arc(100, 180, 50, 0, Math.PI * 2);
     ctx.fill();
@@ -1096,19 +1583,16 @@ function drawSnowman() {
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // الكرة الوسطى
     ctx.beginPath();
     ctx.arc(100, 110, 40, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
-    // الرأس
     ctx.beginPath();
     ctx.arc(100, 50, 30, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
-    // العيون
     ctx.fillStyle = 'black';
     ctx.beginPath();
     ctx.arc(90, 45, 3, 0, Math.PI * 2);
@@ -1117,7 +1601,6 @@ function drawSnowman() {
     ctx.arc(110, 45, 3, 0, Math.PI * 2);
     ctx.fill();
 
-    // الأنف
     ctx.fillStyle = 'orange';
     ctx.beginPath();
     ctx.moveTo(100, 50);
@@ -1125,26 +1608,19 @@ function drawSnowman() {
     ctx.lineTo(100, 55);
     ctx.fill();
 
-    // الفم
     ctx.strokeStyle = 'black';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(100, 60, 10, 0, Math.PI);
     ctx.stroke();
 
-    // الأزرار
     ctx.fillStyle = 'black';
-    ctx.beginPath();
-    ctx.arc(100, 100, 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(100, 115, 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(100, 130, 4, 0, Math.PI * 2);
-    ctx.fill();
+    [100, 115, 130].forEach(y => {
+        ctx.beginPath();
+        ctx.arc(100, y, 4, 0, Math.PI * 2);
+        ctx.fill();
+    });
 
-    // تحريك بسيط
     let y = 0;
     let direction = 1;
     setInterval(() => {
@@ -1154,7 +1630,7 @@ function drawSnowman() {
     }, 50);
 }
 
-// CSS للأنيميشن
+// CSS الأنيميشن
 const style = document.createElement('style');
 style.textContent = `
     @keyframes slideIn {
@@ -1165,15 +1641,52 @@ style.textContent = `
         from { transform: translateX(0); opacity: 1; }
         to { transform: translateX(400px); opacity: 0; }
     }
+    @keyframes partyFloat {
+        0%, 100% { transform: translateY(0) scale(1); }
+        50% { transform: translateY(-50px) scale(1.2); }
+    }
+    .my-message {
+        align-self: flex-end;
+        background: rgba(74, 144, 226, 0.2);
+    }
+    .private-user-item {
+        padding: 1rem;
+        cursor: pointer;
+        border-radius: 10px;
+        transition: all 0.3s ease;
+        margin-bottom: 0.5rem;
+    }
+    .private-user-item:hover {
+        background: rgba(255, 255, 255, 0.1);
+    }
+    .private-header {
+        padding: 1rem;
+        font-weight: 700;
+        border-bottom: 2px solid var(--glass-border);
+        margin-bottom: 1rem;
+    }
 `;
 document.head.appendChild(style);
 
-// التهيئة
+// ═══════════════════════════════════════════════════════════════
+// التهيئة النهائية
+// ═══════════════════════════════════════════════════════════════
+
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('❄️ Cold Room Ready');
+    console.log('❄️ Cold Room V2 Ready');
     initializeSocket();
     createSnowfall();
     drawSnowman();
+    
+    // تشغيل موسيقى التسجيل
+    setTimeout(() => {
+        playLoginMusic();
+    }, 1000);
 });
 
-console.log('✅ Script loaded successfully');
+// YouTube API Ready
+window.onYouTubeIframeAPIReady = function() {
+    console.log('YouTube API Ready');
+};
+
+console.log('✅ Script V2 loaded successfully');
