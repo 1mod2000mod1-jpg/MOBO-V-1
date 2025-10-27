@@ -1,4 +1,6 @@
-// Cold Room Chat System V2 - Complete Client
+// ═══════════════════════════════════════════════════════════════
+// Cold Room Chat System V2 - Complete Client with Video Support
+// ═══════════════════════════════════════════════════════════════
 console.log('❄️ Cold Room V2 loading...');
 
 let socket = null;
@@ -13,20 +15,24 @@ let selectedBanned = [];
 let confirmCallback = null;
 let editingRoomId = null;
 let ytPlayer = null;
+let reconnectAttempts = 0;
+let maxReconnectAttempts = 5;
 
 // ═══════════════════════════════════════════════════════════════
-// التهيئة والاتصال
+// SOCKET INITIALIZATION
 // ═══════════════════════════════════════════════════════════════
 
 function initializeSocket() {
-    console.log('Connecting...');
+    console.log('🔌 Connecting to server...');
     
     socket = io({
         transports: ['websocket', 'polling'],
         reconnection: true,
         reconnectionDelay: 1000,
-        reconnectionAttempts: 10,
-        timeout: 20000
+        reconnectionDelayMax: 5000,
+        reconnectionAttempts: maxReconnectAttempts,
+        timeout: 20000,
+        forceNew: true
     });
 
     setupSocketListeners();
@@ -34,12 +40,32 @@ function initializeSocket() {
 
 function setupSocketListeners() {
     socket.on('connect', () => {
-        console.log('✅ Connected');
+        console.log('✅ Connected to server');
+        reconnectAttempts = 0;
         hideLoading();
+        
+        // Re-authenticate if we were logged in
+        if (currentUser && currentRoom) {
+            console.log('🔄 Reconnecting to room...');
+            socket.emit('join-room', { roomId: currentRoom });
+        }
     });
 
-    socket.on('disconnect', () => {
-        console.log('⚠️ Disconnected');
+    socket.on('disconnect', (reason) => {
+        console.log('⚠️ Disconnected:', reason);
+        if (reason === 'io server disconnect') {
+            // Server disconnected us, try to reconnect
+            socket.connect();
+        }
+    });
+
+    socket.on('connect_error', (error) => {
+        console.error('❌ Connection error:', error);
+        reconnectAttempts++;
+        
+        if (reconnectAttempts >= maxReconnectAttempts) {
+            showAlert('Connection lost. Please refresh the page.', 'error');
+        }
     });
 
     socket.on('login-success', (data) => {
@@ -53,7 +79,7 @@ function setupSocketListeners() {
 
     socket.on('banned-user', (data) => {
         hideLoading();
-        showAlert(`Banned: ${data.reason}`, 'error');
+        showAlert(`You are banned: ${data.reason}`, 'error');
         document.getElementById('support-section').style.display = 'block';
     });
 
@@ -100,7 +126,7 @@ function setupSocketListeners() {
     });
 
     socket.on('room-created', (data) => {
-        showAlert('Room created', 'success');
+        showAlert('Room created successfully', 'success');
         socket.emit('join-room', { roomId: data.roomId });
         hideModal('create-room-modal');
     });
@@ -116,7 +142,7 @@ function setupSocketListeners() {
     socket.on('rooms-list', updateRoomsList);
 
     socket.on('user-joined', (data) => {
-        showNotification(`${data.username} joined`);
+        showNotification(`${data.username} joined the room`);
     });
 
     socket.on('message-deleted', (data) => {
@@ -171,7 +197,7 @@ function setupSocketListeners() {
     });
 
     socket.on('banned', (data) => {
-        showAlert(`Banned: ${data.reason}`, 'error');
+        showAlert(`You have been banned: ${data.reason}`, 'error');
         setTimeout(() => logout(true), 3000);
     });
 
@@ -204,7 +230,7 @@ function setupSocketListeners() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// تسجيل الدخول والتسجيل
+// LOGIN & REGISTER
 // ═══════════════════════════════════════════════════════════════
 
 function handleLoginSuccess(data) {
@@ -219,12 +245,11 @@ function handleLoginSuccess(data) {
     document.getElementById('login-screen').classList.remove('active');
     document.getElementById('chat-screen').classList.add('active');
 
-    // إيقاف موسيقى التسجيل وتشغيل موسيقى الشات
     stopLoginMusic();
-    playChat Music();
+    playChatMusic();
 
     hideLoading();
-    showAlert(`Welcome ${currentUser.displayName}!`, 'success');
+    showAlert(`Welcome ${currentUser.displayName}! ❄️`, 'success');
 
     clearMessages();
     data.room.messages.forEach(msg => addMessage(msg));
@@ -275,7 +300,7 @@ window.login = function() {
     const password = document.getElementById('login-password').value.trim();
 
     if (!username || !password) {
-        showAlert('Please enter all fields', 'error');
+        showAlert('Please enter username and password', 'error');
         return;
     }
 
@@ -312,7 +337,7 @@ window.sendSupportMessage = function() {
     const message = document.getElementById('support-message').value.trim();
     
     if (!message) {
-        showAlert('Write your message first', 'error');
+        showAlert('Please write your message', 'error');
         return;
     }
 
@@ -325,7 +350,7 @@ window.sendSupportMessage = function() {
 };
 
 window.logout = function(forced = false) {
-    if (forced || confirm('Logout?')) {
+    if (forced || confirm('Are you sure you want to logout?')) {
         showLoading('Logging out...');
         if (socket) socket.disconnect();
         setTimeout(() => location.reload(), 1000);
@@ -333,7 +358,7 @@ window.logout = function(forced = false) {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// إرسال وتعديل الرسائل
+// SEND MESSAGES
 // ═══════════════════════════════════════════════════════════════
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -366,12 +391,18 @@ function sendMessage() {
 
     if (!text) return;
 
+    if (!socket || !socket.connected) {
+        showAlert('Connection lost. Reconnecting...', 'error');
+        socket.connect();
+        return;
+    }
+
     socket.emit('send-message', { text: text, roomId: currentRoom });
     textarea.value = '';
 }
 
 function editMessage(messageId, currentText) {
-    const newText = prompt('Edit message:', currentText);
+    const newText = prompt('Edit your message:', currentText);
     if (newText && newText.trim() !== currentText) {
         socket.emit('edit-message', {
             messageId: messageId,
@@ -379,6 +410,10 @@ function editMessage(messageId, currentText) {
         });
     }
 }
+
+// ═══════════════════════════════════════════════════════════════
+// IMAGE & VIDEO UPLOAD (Owner Only)
+// ═══════════════════════════════════════════════════════════════
 
 window.showImageUpload = function() {
     document.getElementById('image-upload-modal').classList.add('active');
@@ -388,7 +423,7 @@ window.sendImageMessage = function() {
     const imageUrl = document.getElementById('image-url-input').value.trim();
     
     if (!imageUrl) {
-        showAlert('Enter image URL', 'error');
+        showAlert('Please enter image URL', 'error');
         return;
     }
 
@@ -397,8 +432,31 @@ window.sendImageMessage = function() {
     hideModal('image-upload-modal');
 };
 
+window.showVideoUpload = function() {
+    document.getElementById('video-upload-modal').classList.add('active');
+};
+
+window.sendVideoMessage = function() {
+    const videoUrl = document.getElementById('video-url-input').value.trim();
+    
+    if (!videoUrl) {
+        showAlert('Please enter video URL (MP4)', 'error');
+        return;
+    }
+
+    // Validate MP4 URL
+    if (!videoUrl.toLowerCase().endsWith('.mp4')) {
+        showAlert('Please enter a valid MP4 video URL', 'error');
+        return;
+    }
+
+    socket.emit('send-video', { videoUrl: videoUrl });
+    document.getElementById('video-url-input').value = '';
+    hideModal('video-upload-modal');
+};
+
 // ═══════════════════════════════════════════════════════════════
-// عرض الرسائل
+// DISPLAY MESSAGES
 // ═══════════════════════════════════════════════════════════════
 
 function addMessage(message) {
@@ -419,7 +477,25 @@ function addMessage(message) {
         badges += '<span class="badge moderator-badge">⭐</span>';
     }
 
-    if (message.isImage) {
+    if (message.isVideo) {
+        messageDiv.innerHTML = `
+            <div class="message-header">
+                <div>
+                    <span class="message-user">${escapeHtml(message.avatar)} ${escapeHtml(message.username)}</span>
+                    ${badges}
+                </div>
+            </div>
+            <div class="message-video">
+                <video controls style="max-width: 500px; max-height: 400px; border-radius: 10px;">
+                    <source src="${escapeHtml(message.videoUrl)}" type="video/mp4">
+                    Your browser does not support video playback.
+                </video>
+            </div>
+            <div class="message-footer">
+                <span class="message-time">${message.timestamp}</span>
+            </div>
+        `;
+    } else if (message.isImage) {
         messageDiv.innerHTML = `
             <div class="message-header">
                 <div>
@@ -428,7 +504,7 @@ function addMessage(message) {
                 </div>
             </div>
             <div class="message-image">
-                <img src="${escapeHtml(message.imageUrl)}" alt="Image" style="max-width: 300px; border-radius: 10px;">
+                <img src="${escapeHtml(message.imageUrl)}" alt="Image" style="max-width: 400px; border-radius: 10px;">
             </div>
             <div class="message-footer">
                 <span class="message-time">${message.timestamp}</span>
@@ -452,7 +528,7 @@ function addMessage(message) {
     if (message.userId !== currentUser?.id || currentUser?.isOwner) {
         messageDiv.style.cursor = 'pointer';
         messageDiv.addEventListener('click', (e) => {
-            if (!e.target.closest('.badge')) {
+            if (!e.target.closest('.badge') && !e.target.closest('video') && !e.target.closest('img')) {
                 selectedUserId = message.userId;
                 selectedUsername = message.username;
                 showMessageActions(message);
@@ -467,31 +543,31 @@ function addMessage(message) {
 function showMessageActions(message) {
     const actions = [];
 
-    // للمستخدم نفسه
-    if (message.userId === currentUser?.id && !message.isImage) {
+    // Own message actions
+    if (message.userId === currentUser?.id && !message.isImage && !message.isVideo) {
         actions.push({ 
             text: '✏️ Edit My Message', 
             action: () => editMessage(message.id, message.text)
         });
     }
 
-    // خيارات المالك
+    // Owner actions
     if (currentUser?.isOwner) {
         if (message.userId !== currentUser.id) {
             actions.push({ text: '👑 Add Moderator', action: () => addModerator() });
             actions.push({ text: '⭐ Remove Moderator', action: () => removeModerator() });
-            actions.push({ text: '🔇 Mute', action: () => showMuteDialog() });
-            actions.push({ text: '🚫 Ban', action: () => banUser() });
+            actions.push({ text: '🔇 Mute User', action: () => showMuteDialog() });
+            actions.push({ text: '🚫 Ban User', action: () => banUser() });
             actions.push({ text: '🗑️ Delete Account', action: () => deleteAccount() });
         }
         actions.push({ text: '❌ Delete Message', action: () => deleteMessage(message.id) });
     } 
-    // خيارات المشرفين
+    // Moderator actions
     else if (currentUser?.isModerator && message.userId !== currentUser.id) {
-        actions.push({ text: '🔇 Mute', action: () => showMuteDialog() });
+        actions.push({ text: '🔇 Mute User', action: () => showMuteDialog() });
     }
 
-    // للجميع
+    // Everyone can send private messages
     if (message.userId !== currentUser?.id) {
         actions.push({ text: '💬 Private Message', action: () => openPrivateChat(selectedUserId) });
     }
@@ -518,12 +594,7 @@ function showActionsMenu(actions) {
         list.appendChild(btn);
     });
 
-    // وضع القائمة في المنتصف بشكل ثابت
     menu.style.display = 'flex';
-    menu.style.position = 'fixed';
-    menu.style.top = '50%';
-    menu.style.left = '50%';
-    menu.style.transform = 'translate(-50%, -50%)';
 
     setTimeout(() => {
         document.addEventListener('click', function closeMenu(e) {
@@ -536,21 +607,23 @@ function showActionsMenu(actions) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// إجراءات المستخدمين
+// USER ACTIONS
 // ═══════════════════════════════════════════════════════════════
 
 window.showMuteDialog = function() {
-    const duration = prompt(`Mute duration for ${selectedUsername} (minutes, 0 = permanent):`, '10');
+    const duration = prompt(`Mute ${selectedUsername} for how many minutes?\n\nEnter 0 for permanent mute:`, '10');
     if (duration === null) return;
     
-    const isPermanent = parseInt(duration) === 0;
-    const reason = prompt('Reason:', 'Rule violation');
+    const durationNum = parseInt(duration);
+    const isPermanent = durationNum === 0;
+    
+    const reason = prompt('Reason for mute:', 'Violation of chat rules');
     if (!reason) return;
 
     socket.emit('mute-user', {
         userId: selectedUserId,
         username: selectedUsername,
-        duration: parseInt(duration) || 0,
+        duration: durationNum,
         reason: reason,
         roomId: currentRoom
     });
@@ -558,10 +631,10 @@ window.showMuteDialog = function() {
 
 window.banUser = function() {
     showConfirm(
-        `Ban ${selectedUsername} permanently?\n\nThis will:\n- Ban their IP address\n- Kick them immediately\n- They cannot rejoin`,
+        `Ban ${selectedUsername} permanently?\n\nThis will:\n• Ban their IP address\n• Kick them immediately\n• Prevent them from returning\n\nAre you sure?`,
         (confirmed) => {
             if (confirmed) {
-                const reason = prompt('Reason:', 'Serious violation');
+                const reason = prompt('Reason for ban:', 'Serious rule violation');
                 if (reason) {
                     socket.emit('ban-user', {
                         userId: selectedUserId,
@@ -576,7 +649,7 @@ window.banUser = function() {
 
 window.deleteAccount = function() {
     showConfirm(
-        `DELETE account ${selectedUsername} permanently?\n\nThis will:\n- Delete all their messages\n- Remove them from all rooms\n- Delete account permanently\n\nThis action CANNOT be undone!`,
+        `⚠️ DELETE ACCOUNT: ${selectedUsername}?\n\nThis action will:\n• Delete ALL their messages\n• Remove them from all rooms\n• Permanently delete their account\n\n⚠️ THIS CANNOT BE UNDONE!\n\nAre you absolutely sure?`,
         (confirmed) => {
             if (confirmed) {
                 socket.emit('delete-account', {
@@ -588,7 +661,7 @@ window.deleteAccount = function() {
 };
 
 window.addModerator = function() {
-    if (!confirm(`Add ${selectedUsername} as moderator?`)) return;
+    if (!confirm(`Add ${selectedUsername} as a moderator?\n\nModerators can mute users.`)) return;
     
     socket.emit('add-moderator', {
         userId: selectedUserId,
@@ -627,8 +700,13 @@ function openPrivateChat(userId) {
     }
 }
 
+// Continue in Part 2...
 // ═══════════════════════════════════════════════════════════════
-// الرسائل الخاصة
+// Cold Room V2 - Script Part 2 (Rooms, Settings, Effects)
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
+// PRIVATE MESSAGES
 // ═══════════════════════════════════════════════════════════════
 
 window.showPrivateMessages = function() {
@@ -718,11 +796,8 @@ function addPrivateMessage(message) {
     container.scrollTop = container.scrollHeight;
 }
 
-// سأكمل في الرد التالي مع بقية الوظائف...
-// Cold Room V2 - Part 2: Rooms, Settings, Effects
-
 // ═══════════════════════════════════════════════════════════════
-// إدارة الغرف
+// ROOM MANAGEMENT
 // ═══════════════════════════════════════════════════════════════
 
 window.showCreateRoomModal = function() {
@@ -735,7 +810,7 @@ window.createRoom = function() {
     const password = document.getElementById('room-pass-input').value.trim();
 
     if (!name) {
-        showAlert('Enter room name', 'error');
+        showAlert('Please enter room name', 'error');
         return;
     }
 
@@ -793,900 +868,4 @@ function updateRoomsList(rooms) {
 
         div.innerHTML = `
             <div class="room-item-name">${official}${lock}${escapeHtml(room.name)}</div>
-            <div class="room-item-desc">${escapeHtml(room.description)}</div>
-            <div class="room-item-info">
-                <span>👥 ${room.userCount}</span>
-                <span>${escapeHtml(room.createdBy)}</span>
-            </div>
-        `;
-
-        div.onclick = () => joinRoom(room.id);
-
-        // خيارات المالك بالضغط الطويل
-        if (currentUser?.isOwner) {
-            let pressTimer;
-            div.addEventListener('mousedown', (e) => {
-                pressTimer = setTimeout(() => showRoomActions(room.id, room.name, room.isOfficial), 500);
-            });
-            div.addEventListener('mouseup', () => clearTimeout(pressTimer));
-            div.addEventListener('mouseleave', () => clearTimeout(pressTimer));
-            
-            // للجوال
-            div.addEventListener('touchstart', (e) => {
-                pressTimer = setTimeout(() => {
-                    e.preventDefault();
-                    showRoomActions(room.id, room.name, room.isOfficial);
-                }, 500);
-            });
-            div.addEventListener('touchend', () => clearTimeout(pressTimer));
-        }
-
-        container.appendChild(div);
-    });
-}
-
-function showRoomActions(roomId, roomName, isOfficial) {
-    const actions = [
-        { text: '✏️ Edit Room', action: () => showEditRoomModal(roomId) },
-        { text: '🔇 Silence Room', action: () => silenceRoom(roomId) },
-        { text: '🔊 Unsilence Room', action: () => unsilenceRoom(roomId) },
-        { text: '🧹 Clean Chat', action: () => cleanChat(roomId) }
-    ];
-
-    if (!isOfficial) {
-        actions.push({ text: '🗑️ Delete Room', action: () => deleteRoom(roomId, roomName) });
-    }
-
-    actions.push({ text: '❌ Cancel', action: () => {} });
-
-    showActionsMenu(actions);
-}
-
-function showEditRoomModal(roomId) {
-    editingRoomId = roomId;
-    document.getElementById('edit-room-modal').classList.add('active');
-}
-
-window.saveRoomEdit = function() {
-    const name = document.getElementById('edit-room-name').value.trim();
-    const description = document.getElementById('edit-room-desc').value.trim();
-    const password = document.getElementById('edit-room-pass').value.trim();
-
-    socket.emit('update-room', {
-        roomId: editingRoomId,
-        name: name,
-        description: description,
-        password: password || null
-    });
-
-    hideModal('edit-room-modal');
-    document.getElementById('edit-room-name').value = '';
-    document.getElementById('edit-room-desc').value = '';
-    document.getElementById('edit-room-pass').value = '';
-};
-
-function silenceRoom(roomId) {
-    socket.emit('silence-room', { roomId: roomId });
-}
-
-function unsilenceRoom(roomId) {
-    socket.emit('unsilence-room', { roomId: roomId });
-}
-
-function cleanChat(roomId) {
-    showConfirm('Clean all messages in this room?', (confirmed) => {
-        if (confirmed) {
-            socket.emit('clean-chat', { roomId: roomId });
-        }
-    });
-}
-
-function deleteRoom(roomId, roomName) {
-    showConfirm(`Delete room "${roomName}" permanently?`, (confirmed) => {
-        if (confirmed) {
-            socket.emit('delete-room', { roomId: roomId });
-        }
-    });
-}
-
-function updateUsersList(users) {
-    const container = document.getElementById('users-list');
-    if (!container) return;
-
-    document.getElementById('users-count').textContent = users.length;
-    container.innerHTML = '';
-
-    users.forEach(user => {
-        if (user.id === currentUser?.id) return;
-
-        const div = document.createElement('div');
-        div.className = 'user-item';
-        div.dataset.userId = user.id;
-        div.dataset.userName = user.displayName;
-
-        let badges = '';
-        if (user.isOwner) badges += '<span class="badge owner-badge">👑</span>';
-        else if (user.isModerator) badges += '<span class="badge moderator-badge">⭐</span>';
-
-        div.innerHTML = `
-            <div class="user-avatar-wrapper">
-                <div class="user-avatar">${escapeHtml(user.avatar)}</div>
-                ${user.isOnline ? '<span class="online-indicator"></span>' : ''}
-            </div>
-            <div class="user-info">
-                <div class="user-name">${escapeHtml(user.displayName)} ${badges}</div>
-            </div>
-        `;
-
-        div.onclick = () => {
-            selectedUserId = user.id;
-            selectedUsername = user.displayName;
-            openPrivateChat(user.id);
-        };
-
-        container.appendChild(div);
-    });
-}
-
-function updateUserBadges() {
-    const container = document.getElementById('user-badges');
-    if (!container) return;
-
-    let badges = '';
-    
-    if (currentUser.isOwner) {
-        badges += '<span class="badge owner-badge">👑 Owner</span>';
-    }
-
-    container.innerHTML = badges;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// لوحة المالك
-// ═══════════════════════════════════════════════════════════════
-
-window.showOwnerPanel = function() {
-    document.getElementById('owner-panel-modal').classList.add('active');
-    switchOwnerTab('muted');
-};
-
-window.switchOwnerTab = function(tabName) {
-    document.querySelectorAll('.owner-tab-content').forEach(tab => {
-        tab.classList.remove('active');
-    });
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.classList.remove('active');
-    });
-
-    document.getElementById(`owner-${tabName}`).classList.add('active');
-    event.target.classList.add('active');
-
-    if (tabName === 'muted') {
-        socket.emit('get-muted-list');
-    } else if (tabName === 'banned') {
-        socket.emit('get-banned-list');
-    } else if (tabName === 'support') {
-        socket.emit('get-support-messages');
-    } else if (tabName === 'settings') {
-        loadSettings();
-    }
-};
-
-function displayMutedList(list) {
-    const container = document.getElementById('muted-list');
-    if (!container) return;
-
-    container.innerHTML = '';
-    selectedMuted = [];
-
-    if (list.length === 0) {
-        container.innerHTML = '<div style="text-align: center; padding: 2rem;">No muted users</div>';
-        return;
-    }
-
-    list.forEach(item => {
-        const div = document.createElement('div');
-        div.className = 'owner-item';
-
-        const timeLeft = item.temporary && item.expires ? 
-            Math.ceil((item.expires - Date.now()) / 60000) + ' min' : 'Permanent';
-
-        div.innerHTML = `
-            <div class="owner-item-header">
-                <div>
-                    <input type="checkbox" class="muted-checkbox" data-user-id="${item.userId}" 
-                           style="margin-right: 10px;">
-                    <strong>${escapeHtml(item.username)}</strong><br>
-                    <small>By: ${escapeHtml(item.mutedBy)}</small>
-                </div>
-                <div class="owner-item-actions">
-                    <button class="modern-btn small" onclick="unmute('${item.userId}')">Unmute</button>
-                </div>
-            </div>
-            <div>
-                <small>Reason: ${escapeHtml(item.reason)}</small><br>
-                <small>Duration: ${timeLeft}</small>
-            </div>
-        `;
-
-        container.appendChild(div);
-    });
-}
-
-function displayBannedList(list) {
-    const container = document.getElementById('banned-list');
-    if (!container) return;
-
-    container.innerHTML = '';
-    selectedBanned = [];
-
-    if (list.length === 0) {
-        container.innerHTML = '<div style="text-align: center; padding: 2rem;">No banned users</div>';
-        return;
-    }
-
-    list.forEach(item => {
-        const div = document.createElement('div');
-        div.className = 'owner-item';
-
-        div.innerHTML = `
-            <div class="owner-item-header">
-                <div>
-                    <input type="checkbox" class="banned-checkbox" data-user-id="${item.userId}" 
-                           style="margin-right: 10px;">
-                    <strong>${escapeHtml(item.username)}</strong><br>
-                    <small>By: ${escapeHtml(item.bannedBy)}</small>
-                </div>
-                <div class="owner-item-actions">
-                    <button class="modern-btn small" onclick="unban('${item.userId}')">Unban</button>
-                </div>
-            </div>
-            <div>
-                <small>Reason: ${escapeHtml(item.reason)}</small><br>
-                <small>Date: ${new Date(item.bannedAt).toLocaleString()}</small>
-            </div>
-        `;
-
-        container.appendChild(div);
-    });
-}
-
-function displaySupportMessages(messages) {
-    const container = document.getElementById('support-messages-list');
-    if (!container) return;
-
-    container.innerHTML = '';
-
-    if (messages.length === 0) {
-        container.innerHTML = '<div style="text-align: center; padding: 2rem;">No support messages</div>';
-        return;
-    }
-
-    messages.forEach(msg => {
-        const div = document.createElement('div');
-        div.className = 'owner-item';
-
-        div.innerHTML = `
-            <div class="owner-item-header">
-                <div>
-                    <strong>${escapeHtml(msg.from)}</strong><br>
-                    <small>${new Date(msg.sentAt).toLocaleString()}</small>
-                </div>
-                <div class="owner-item-actions">
-                    <button class="modern-btn small" onclick="deleteSupportMessage('${msg.id}')">Delete</button>
-                </div>
-            </div>
-            <div style="margin-top: 1rem; padding: 1rem; background: rgba(0,0,0,0.2); border-radius: 10px;">
-                ${escapeHtml(msg.message)}
-            </div>
-        `;
-
-        container.appendChild(div);
-    });
-}
-
-window.selectAllMuted = function() {
-    document.querySelectorAll('.muted-checkbox').forEach(cb => cb.checked = true);
-};
-
-window.selectAllBanned = function() {
-    document.querySelectorAll('.banned-checkbox').forEach(cb => cb.checked = true);
-};
-
-window.unmuteSelected = function() {
-    const selected = Array.from(document.querySelectorAll('.muted-checkbox:checked'))
-        .map(cb => cb.dataset.userId);
-    
-    if (selected.length === 0) {
-        showAlert('Select users first', 'error');
-        return;
-    }
-
-    showConfirm(`Unmute ${selected.length} users?`, (confirmed) => {
-        if (confirmed) {
-            socket.emit('unmute-multiple', { userIds: selected });
-            setTimeout(() => socket.emit('get-muted-list'), 500);
-        }
-    });
-};
-
-window.unbanSelected = function() {
-    const selected = Array.from(document.querySelectorAll('.banned-checkbox:checked'))
-        .map(cb => cb.dataset.userId);
-    
-    if (selected.length === 0) {
-        showAlert('Select users first', 'error');
-        return;
-    }
-
-    showConfirm(`Unban ${selected.length} users?`, (confirmed) => {
-        if (confirmed) {
-            socket.emit('unban-multiple', { userIds: selected });
-            setTimeout(() => socket.emit('get-banned-list'), 500);
-        }
-    });
-};
-
-window.unmute = function(userId) {
-    socket.emit('unmute-user', { userId: userId });
-    setTimeout(() => socket.emit('get-muted-list'), 500);
-};
-
-window.unban = function(userId) {
-    socket.emit('unban-user', { userId: userId });
-    setTimeout(() => socket.emit('get-banned-list'), 500);
-};
-
-window.deleteSupportMessage = function(messageId) {
-    socket.emit('delete-support-message', { messageId: messageId });
-    setTimeout(() => socket.emit('get-support-messages'), 500);
-};
-
-// ═══════════════════════════════════════════════════════════════
-// الإعدادات
-// ═══════════════════════════════════════════════════════════════
-
-function loadSettings() {
-    document.getElementById('setting-logo').value = systemSettings.siteLogo || '';
-    document.getElementById('setting-title').value = systemSettings.siteTitle || '';
-    document.getElementById('setting-color').value = systemSettings.backgroundColor || 'blue';
-    document.getElementById('setting-login-music').value = systemSettings.loginMusic || '';
-    document.getElementById('setting-chat-music').value = systemSettings.chatMusic || '';
-    document.getElementById('setting-login-volume').value = systemSettings.loginMusicVolume || 0.5;
-    document.getElementById('setting-chat-volume').value = systemSettings.chatMusicVolume || 0.5;
-}
-
-window.updateLogo = function() {
-    const logo = document.getElementById('setting-logo').value.trim();
-    if (!logo) {
-        showAlert('Enter logo URL', 'error');
-        return;
-    }
-    socket.emit('update-settings', { siteLogo: logo });
-};
-
-window.updateTitle = function() {
-    const title = document.getElementById('setting-title').value.trim();
-    if (!title) {
-        showAlert('Enter title', 'error');
-        return;
-    }
-    socket.emit('update-settings', { siteTitle: title });
-};
-
-window.updateColor = function() {
-    const color = document.getElementById('setting-color').value;
-    socket.emit('update-settings', { backgroundColor: color });
-};
-
-window.updateLoginMusic = function() {
-    const music = document.getElementById('setting-login-music').value.trim();
-    const volume = parseFloat(document.getElementById('setting-login-volume').value);
-    socket.emit('update-settings', { 
-        loginMusic: music,
-        loginMusicVolume: volume
-    });
-};
-
-window.updateChatMusic = function() {
-    const music = document.getElementById('setting-chat-music').value.trim();
-    const volume = parseFloat(document.getElementById('setting-chat-volume').value);
-    socket.emit('update-settings', { 
-        chatMusic: music,
-        chatMusicVolume: volume
-    });
-};
-
-window.cleanAllRooms = function() {
-    showConfirm('Clean ALL messages in ALL rooms?\n\nThis cannot be undone!', (confirmed) => {
-        if (confirmed) {
-            socket.emit('clean-all-rooms');
-        }
-    });
-};
-
-function applySiteSettings() {
-    // تحديث الشعار
-    document.querySelectorAll('#main-logo, #header-logo, #site-favicon').forEach(el => {
-        if (el.tagName === 'IMG') {
-            el.src = systemSettings.siteLogo;
-        } else if (el.tagName === 'LINK') {
-            el.href = systemSettings.siteLogo;
-        }
-    });
-
-    // تحديث العنوان
-    document.getElementById('site-title').textContent = systemSettings.siteTitle;
-    document.getElementById('main-title').textContent = systemSettings.siteTitle;
-    document.getElementById('header-title').textContent = systemSettings.siteTitle;
-
-    // تطبيق اللون
-    if (systemSettings.backgroundColor === 'black') {
-        document.body.classList.add('black-theme');
-    } else {
-        document.body.classList.remove('black-theme');
-    }
-
-    // تشغيل الموسيقى
-    updateMusicPlayers();
-}
-
-function updateMusicPlayers() {
-    const loginMusic = document.getElementById('login-music');
-    const chatMusic = document.getElementById('chat-music');
-
-    if (systemSettings.loginMusic) {
-        loginMusic.src = systemSettings.loginMusic;
-        loginMusic.volume = systemSettings.loginMusicVolume || 0.5;
-    }
-
-    if (systemSettings.chatMusic) {
-        chatMusic.src = systemSettings.chatMusic;
-        chatMusic.volume = systemSettings.chatMusicVolume || 0.5;
-    }
-}
-
-function playLoginMusic() {
-    const audio = document.getElementById('login-music');
-    if (audio.src) {
-        audio.play().catch(() => {
-            // المتصفح منع التشغيل التلقائي - سيعمل بعد أول تفاعل
-        });
-    }
-}
-
-function stopLoginMusic() {
-    const audio = document.getElementById('login-music');
-    audio.pause();
-}
-
-function playChatMusic() {
-    const audio = document.getElementById('chat-music');
-    if (audio.src) {
-        audio.play().catch(() => {});
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// وضع الحفلة
-// ═══════════════════════════════════════════════════════════════
-
-window.togglePartyMode = function() {
-    const enabled = !document.body.classList.contains('party-mode');
-    socket.emit('toggle-party-mode', {
-        roomId: currentRoom,
-        enabled: enabled
-    });
-};
-
-function togglePartyEffects(enabled) {
-    if (enabled) {
-        document.body.classList.add('party-mode');
-        createPartyLights();
-    } else {
-        document.body.classList.remove('party-mode');
-        removePartyLights();
-    }
-}
-
-function createPartyLights() {
-    let container = document.getElementById('party-lights');
-    if (container) return;
-
-    container = document.createElement('div');
-    container.id = 'party-lights';
-    container.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        pointer-events: none;
-        z-index: 1;
-    `;
-
-    const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff'];
-    
-    for (let i = 0; i < 20; i++) {
-        const light = document.createElement('div');
-        light.style.cssText = `
-            position: absolute;
-            width: ${Math.random() * 100 + 50}px;
-            height: ${Math.random() * 100 + 50}px;
-            background: radial-gradient(circle, ${colors[Math.floor(Math.random() * colors.length)]} 0%, transparent 70%);
-            border-radius: 50%;
-            top: ${Math.random() * 100}%;
-            left: ${Math.random() * 100}%;
-            animation: partyFloat ${Math.random() * 3 + 2}s infinite ease-in-out;
-            opacity: 0.6;
-        `;
-        container.appendChild(light);
-    }
-
-    document.body.appendChild(container);
-}
-
-function removePartyLights() {
-    const container = document.getElementById('party-lights');
-    if (container) container.remove();
-}
-
-// ═══════════════════════════════════════════════════════════════
-// يوتيوب
-// ═══════════════════════════════════════════════════════════════
-
-window.showYouTubeModal = function() {
-    document.getElementById('youtube-modal').classList.add('active');
-};
-
-window.startYouTubeWatch = function() {
-    const input = document.getElementById('youtube-url-input').value.trim();
-    if (!input) {
-        showAlert('Enter YouTube URL or ID', 'error');
-        return;
-    }
-
-    let videoId = input;
-    if (input.includes('youtube.com') || input.includes('youtu.be')) {
-        const match = input.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&]+)/);
-        if (match) videoId = match[1];
-    }
-
-    socket.emit('start-youtube-watch', { videoId: videoId });
-    hideModal('youtube-modal');
-    document.getElementById('youtube-url-input').value = '';
-};
-
-function showYouTubePlayer(videoId) {
-    const container = document.getElementById('youtube-player-container');
-    container.style.display = 'block';
-
-    if (!ytPlayer) {
-        ytPlayer = new YT.Player('youtube-player', {
-            height: '360',
-            width: '640',
-            videoId: videoId,
-            events: {
-                'onReady': (event) => event.target.playVideo()
-            }
-        });
-    } else {
-        ytPlayer.loadVideoById(videoId);
-    }
-}
-
-function hideYouTubePlayer() {
-    const container = document.getElementById('youtube-player-container');
-    container.style.display = 'none';
-    if (ytPlayer) {
-        ytPlayer.stopVideo();
-    }
-}
-
-window.closeYouTube = function() {
-    if (currentUser?.isOwner) {
-        socket.emit('stop-youtube-watch');
-    }
-    hideYouTubePlayer();
-};
-
-// ═══════════════════════════════════════════════════════════════
-// الدوال المساعدة
-// ═══════════════════════════════════════════════════════════════
-
-window.hideModal = function(modalId) {
-    document.getElementById(modalId).classList.remove('active');
-};
-
-function clearMessages() {
-    const container = document.getElementById('messages');
-    if (container) {
-        container.innerHTML = `
-            <div class="welcome-message glass-card">
-                <img src="${systemSettings.siteLogo}" alt="Welcome" class="welcome-logo">
-                <h3>Welcome to ${systemSettings.siteTitle}! ❄️</h3>
-                <p>Start chatting</p>
-            </div>
-        `;
-    }
-}
-
-function scrollToBottom() {
-    const container = document.getElementById('messages');
-    if (container) {
-        setTimeout(() => {
-            container.scrollTop = container.scrollHeight;
-        }, 100);
-    }
-}
-
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-function showAlert(message, type = 'info') {
-    const colors = {
-        error: '#dc2626',
-        success: '#10b981',
-        warning: '#f59e0b',
-        info: '#4a90e2'
-    };
-    
-    const alertDiv = document.createElement('div');
-    alertDiv.className = 'custom-alert';
-    alertDiv.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        background: ${colors[type]};
-        color: white;
-        padding: 1rem 1.5rem;
-        border-radius: 12px;
-        z-index: 10000;
-        font-weight: 600;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-        max-width: 400px;
-        animation: slideIn 0.3s ease-out;
-    `;
-    alertDiv.textContent = message;
-    document.body.appendChild(alertDiv);
-    
-    setTimeout(() => {
-        alertDiv.style.animation = 'slideOut 0.3s ease-out';
-        setTimeout(() => alertDiv.remove(), 300);
-    }, 4000);
-}
-
-function showNotification(message) {
-    const div = document.createElement('div');
-    div.style.cssText = `
-        position: fixed;
-        top: 80px;
-        right: 20px;
-        background: rgba(74, 144, 226, 0.9);
-        color: white;
-        padding: 1rem 1.5rem;
-        border-radius: 12px;
-        z-index: 9999;
-        animation: slideIn 0.3s ease-out;
-    `;
-    div.textContent = message;
-    document.body.appendChild(div);
-    
-    setTimeout(() => {
-        div.style.animation = 'slideOut 0.3s ease-out';
-        setTimeout(() => div.remove(), 300);
-    }, 3000);
-}
-
-function showLoading(message = 'Loading...') {
-    let div = document.getElementById('loading-overlay');
-    
-    if (!div) {
-        div = document.createElement('div');
-        div.id = 'loading-overlay';
-        div.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.85);
-            backdrop-filter: blur(10px);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 10000;
-            color: white;
-        `;
-        document.body.appendChild(div);
-    }
-    
-    div.innerHTML = `
-        <div style="text-align: center;">
-            <div class="spinner"></div>
-            <div style="margin-top: 1.5rem; font-size: 1.2rem; font-weight: 600;">${message}</div>
-        </div>
-    `;
-}
-
-function hideLoading() {
-    const div = document.getElementById('loading-overlay');
-    if (div) div.remove();
-}
-
-function showConfirm(message, callback) {
-    confirmCallback = callback;
-    document.getElementById('confirm-message').textContent = message;
-    document.getElementById('confirm-modal').classList.add('active');
-}
-
-window.confirmAction = function(confirmed) {
-    hideModal('confirm-modal');
-    if (confirmCallback) {
-        confirmCallback(confirmed);
-        confirmCallback = null;
-    }
-};
-
-function startHeartbeat() {
-    setInterval(() => {
-        if (socket && socket.connected) {
-            socket.emit('ping');
-        }
-    }, 30000);
-}
-
-// ═══════════════════════════════════════════════════════════════
-// التأثيرات البصرية
-// ═══════════════════════════════════════════════════════════════
-
-function createSnowfall() {
-    const container = document.getElementById('snowflakes');
-    if (!container) return;
-    
-    container.innerHTML = '';
-    
-    for (let i = 0; i < 50; i++) {
-        const snowflake = document.createElement('div');
-        snowflake.className = 'snowflake';
-        snowflake.textContent = '❄';
-        snowflake.style.cssText = `
-            left: ${Math.random() * 100}%;
-            animation-duration: ${Math.random() * 3 + 2}s;
-            animation-delay: ${Math.random() * 5}s;
-            font-size: ${Math.random() * 10 + 10}px;
-        `;
-        container.appendChild(snowflake);
-    }
-}
-
-function drawSnowman() {
-    const canvas = document.getElementById('snowman-canvas');
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    canvas.width = 200;
-    canvas.height = 250;
-
-    ctx.globalAlpha = 0.4; // شفافية أقل
-
-    ctx.fillStyle = 'white';
-    
-    ctx.beginPath();
-    ctx.arc(100, 180, 50, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#4a90e2';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.arc(100, 110, 40, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.arc(100, 50, 30, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.fillStyle = 'black';
-    ctx.beginPath();
-    ctx.arc(90, 45, 3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(110, 45, 3, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = 'orange';
-    ctx.beginPath();
-    ctx.moveTo(100, 50);
-    ctx.lineTo(120, 50);
-    ctx.lineTo(100, 55);
-    ctx.fill();
-
-    ctx.strokeStyle = 'black';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(100, 60, 10, 0, Math.PI);
-    ctx.stroke();
-
-    ctx.fillStyle = 'black';
-    [100, 115, 130].forEach(y => {
-        ctx.beginPath();
-        ctx.arc(100, y, 4, 0, Math.PI * 2);
-        ctx.fill();
-    });
-
-    let y = 0;
-    let direction = 1;
-    setInterval(() => {
-        y += direction * 0.5;
-        if (y > 10 || y < -10) direction *= -1;
-        canvas.style.transform = `translateX(-50%) translateY(${y}px)`;
-    }, 50);
-}
-
-// CSS الأنيميشن
-const style = document.createElement('style');
-style.textContent = `
-    @keyframes slideIn {
-        from { transform: translateX(400px); opacity: 0; }
-        to { transform: translateX(0); opacity: 1; }
-    }
-    @keyframes slideOut {
-        from { transform: translateX(0); opacity: 1; }
-        to { transform: translateX(400px); opacity: 0; }
-    }
-    @keyframes partyFloat {
-        0%, 100% { transform: translateY(0) scale(1); }
-        50% { transform: translateY(-50px) scale(1.2); }
-    }
-    .my-message {
-        align-self: flex-end;
-        background: rgba(74, 144, 226, 0.2);
-    }
-    .private-user-item {
-        padding: 1rem;
-        cursor: pointer;
-        border-radius: 10px;
-        transition: all 0.3s ease;
-        margin-bottom: 0.5rem;
-    }
-    .private-user-item:hover {
-        background: rgba(255, 255, 255, 0.1);
-    }
-    .private-header {
-        padding: 1rem;
-        font-weight: 700;
-        border-bottom: 2px solid var(--glass-border);
-        margin-bottom: 1rem;
-    }
-`;
-document.head.appendChild(style);
-
-// ═══════════════════════════════════════════════════════════════
-// التهيئة النهائية
-// ═══════════════════════════════════════════════════════════════
-
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('❄️ Cold Room V2 Ready');
-    initializeSocket();
-    createSnowfall();
-    drawSnowman();
-    
-    // تشغيل موسيقى التسجيل
-    setTimeout(() => {
-        playLoginMusic();
-    }, 1000);
-});
-
-// YouTube API Ready
-window.onYouTubeIframeAPIReady = function() {
-    console.log('YouTube API Ready');
-};
-
-console.log('✅ Script V2 loaded successfully');
+            <div class="room-item-desc">${escapeHtml(room.description)
