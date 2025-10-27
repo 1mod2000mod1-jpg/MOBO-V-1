@@ -12,7 +12,7 @@ const io = socketIo(server, {
   cors: { origin: "*", methods: ["GET", "POST"] },
   pingTimeout: 60000,
   pingInterval: 25000,
-  maxHttpBufferSize: 1e8 // 100 MB for video support
+  maxHttpBufferSize: 1e8
 });
 
 const PORT = process.env.PORT || 3000;
@@ -23,7 +23,7 @@ app.use(express.json({ limit: '100mb' }));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 // ═══════════════════════════════════════════════════════════════
-// DATA STORAGE
+// PERSISTENT DATA STORAGE
 // ═══════════════════════════════════════════════════════════════
 
 const DATA_FILE = 'cold_room_data.json';
@@ -37,7 +37,7 @@ let data = {
   privateMessages: {},
   supportMessages: {},
   systemSettings: {
-    siteLogo: 'https://i.ibb.co/ZYW3VTp/cold-room-logo.png',
+    siteLogo: 'https://j.top4top.io/p_3585vud691.jpg',
     siteTitle: 'Cold Room',
     backgroundColor: 'blue',
     loginMusic: '',
@@ -54,18 +54,26 @@ function loadData() {
       const fileData = fs.readFileSync(DATA_FILE, 'utf8');
       const loaded = JSON.parse(fileData);
       data = { ...data, ...loaded };
-      console.log('✅ Data loaded from file');
+      console.log('✅ Data loaded successfully');
     }
   } catch (error) {
-    console.log('⚠️ No saved data found, using defaults');
+    console.log('⚠️ Starting with fresh data');
   }
 }
 
 function saveData() {
   try {
+    data.users = Object.fromEntries(users);
+    data.rooms = Object.fromEntries(rooms);
+    data.mutedUsers = Object.fromEntries(mutedUsers);
+    data.bannedUsers = Object.fromEntries(bannedUsers);
+    data.bannedIPs = Object.fromEntries(bannedIPs);
+    data.privateMessages = Object.fromEntries(privateMessages);
+    data.supportMessages = Object.fromEntries(supportMessages);
+    data.systemSettings = systemSettings;
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
   } catch (error) {
-    console.error('❌ Error saving data:', error);
+    console.error('❌ Save error:', error);
   }
 }
 
@@ -84,14 +92,6 @@ let systemSettings = data.systemSettings;
 // Auto-save every 30 seconds
 setInterval(() => {
   try {
-    data.users = Object.fromEntries(users);
-    data.rooms = Object.fromEntries(rooms);
-    data.mutedUsers = Object.fromEntries(mutedUsers);
-    data.bannedUsers = Object.fromEntries(bannedUsers);
-    data.bannedIPs = Object.fromEntries(bannedIPs);
-    data.privateMessages = Object.fromEntries(privateMessages);
-    data.supportMessages = Object.fromEntries(supportMessages);
-    data.systemSettings = systemSettings;
     saveData();
   } catch (error) {
     console.error('❌ Auto-save error:', error);
@@ -120,7 +120,7 @@ function createOwner() {
     };
     users.set(ownerId, owner);
     privateMessages.set(ownerId, {});
-    console.log('✅ Owner created: COLDKING / ColdKing@2025');
+    console.log('✅ Owner: COLDKING / ColdKing@2025');
   }
 }
 
@@ -155,14 +155,12 @@ createGlobalRoom();
 setInterval(() => {
   const now = Date.now();
   
-  // Clean offline users
   for (const [userId, lastSeen] of onlineUsers.entries()) {
     if (now - lastSeen > 300000) {
       onlineUsers.delete(userId);
     }
   }
   
-  // Clean expired mutes
   for (const [userId, muteData] of mutedUsers.entries()) {
     if (muteData.temporary && muteData.expires && now > muteData.expires) {
       if (!muteData.byOwner) {
@@ -177,7 +175,7 @@ setInterval(() => {
 // ═══════════════════════════════════════════════════════════════
 
 io.on('connection', (socket) => {
-  console.log('🔗 Connection:', socket.id);
+  console.log('🔗 New connection:', socket.id);
   socket.userIP = socket.handshake.address;
 
   // ───────────────────────────────────────────────────────────
@@ -245,7 +243,7 @@ io.on('connection', (socket) => {
         room: {
           id: globalRoom.id,
           name: globalRoom.name,
-          messages: globalRoom.messages.slice(-100),
+          messages: globalRoom.messages.slice(-50),
           partyMode: systemSettings.partyMode[globalRoom.id] || false
         },
         systemSettings: systemSettings
@@ -261,7 +259,7 @@ io.on('connection', (socket) => {
 
     } catch (error) {
       console.error('❌ Login error:', error);
-      socket.emit('login-error', 'Login failed. Please try again.');
+      socket.emit('login-error', 'Login failed');
     }
   });
 
@@ -277,16 +275,16 @@ io.on('connection', (socket) => {
       }
 
       if (username.length < 3 || username.length > 20) {
-        return socket.emit('register-error', 'Username must be 3-20 characters');
+        return socket.emit('register-error', 'Username: 3-20 characters');
       }
 
       if (password.length < 6) {
-        return socket.emit('register-error', 'Password must be 6+ characters');
+        return socket.emit('register-error', 'Password: 6+ characters');
       }
 
       for (const user of users.values()) {
         if (user.username.toLowerCase() === username.toLowerCase()) {
-          return socket.emit('register-error', 'Username already exists');
+          return socket.emit('register-error', 'Username exists');
         }
       }
 
@@ -311,7 +309,7 @@ io.on('connection', (socket) => {
       privateMessages.set(userId, {});
 
       socket.emit('register-success', {
-        message: 'Account created successfully!',
+        message: 'Account created!',
         username: username
       });
 
@@ -370,109 +368,18 @@ io.on('connection', (socket) => {
 
       room.messages.push(message);
       
-      if (room.messages.length > 100) {
-        room.messages = room.messages.slice(-100);
+      if (room.messages.length > 50) {
+        room.messages = room.messages.slice(-50);
       }
 
       io.to(socket.currentRoom).emit('new-message', message);
       onlineUsers.set(socket.userId, Date.now());
       
-      // Save after each message
       setTimeout(() => saveData(), 100);
 
     } catch (error) {
       console.error('❌ Message error:', error);
-      socket.emit('message-error', 'Failed to send message');
-    }
-  });
-
-  // ───────────────────────────────────────────────────────────
-  // SEND IMAGE (Owner Only)
-  // ───────────────────────────────────────────────────────────
-  socket.on('send-image', async (data) => {
-    try {
-      const user = users.get(socket.userId);
-      if (!user || !user.canSendImages) {
-        return socket.emit('error', 'No permission to send images');
-      }
-
-      const room = rooms.get(socket.currentRoom);
-      if (!room) return;
-
-      const message = {
-        id: 'msg_' + uuidv4(),
-        userId: socket.userId,
-        username: user.displayName,
-        avatar: user.avatar,
-        imageUrl: data.imageUrl,
-        timestamp: new Date().toLocaleTimeString('en-US', {
-          hour: '2-digit',
-          minute: '2-digit'
-        }),
-        date: new Date().toISOString(),
-        isOwner: true,
-        specialBadges: user.specialBadges || [],
-        roomId: socket.currentRoom,
-        isImage: true,
-        isVideo: false
-      };
-
-      room.messages.push(message);
-      
-      if (room.messages.length > 100) {
-        room.messages = room.messages.slice(-100);
-      }
-
-      io.to(socket.currentRoom).emit('new-message', message);
-      setTimeout(() => saveData(), 100);
-
-    } catch (error) {
-      console.error('❌ Image send error:', error);
-    }
-  });
-
-  // ───────────────────────────────────────────────────────────
-  // SEND VIDEO (Owner Only - NEW)
-  // ───────────────────────────────────────────────────────────
-  socket.on('send-video', async (data) => {
-    try {
-      const user = users.get(socket.userId);
-      if (!user || !user.canSendVideos) {
-        return socket.emit('error', 'No permission to send videos');
-      }
-
-      const room = rooms.get(socket.currentRoom);
-      if (!room) return;
-
-      const message = {
-        id: 'msg_' + uuidv4(),
-        userId: socket.userId,
-        username: user.displayName,
-        avatar: user.avatar,
-        videoUrl: data.videoUrl,
-        timestamp: new Date().toLocaleTimeString('en-US', {
-          hour: '2-digit',
-          minute: '2-digit'
-        }),
-        date: new Date().toISOString(),
-        isOwner: true,
-        specialBadges: user.specialBadges || [],
-        roomId: socket.currentRoom,
-        isImage: false,
-        isVideo: true
-      };
-
-      room.messages.push(message);
-      
-      if (room.messages.length > 100) {
-        room.messages = room.messages.slice(-100);
-      }
-
-      io.to(socket.currentRoom).emit('new-message', message);
-      setTimeout(() => saveData(), 100);
-
-    } catch (error) {
-      console.error('❌ Video send error:', error);
+      socket.emit('message-error', 'Failed to send');
     }
   });
 
@@ -504,7 +411,121 @@ io.on('connection', (socket) => {
       }
 
     } catch (error) {
-      console.error('❌ Edit message error:', error);
+      console.error('❌ Edit error:', error);
+    }
+  });
+
+  // ───────────────────────────────────────────────────────────
+  // SEND IMAGE (Owner Only)
+  // ───────────────────────────────────────────────────────────
+  socket.on('send-image', async (data) => {
+    try {
+      const user = users.get(socket.userId);
+      if (!user || !user.canSendImages) {
+        return socket.emit('error', 'No permission');
+      }
+
+      const room = rooms.get(socket.currentRoom);
+      if (!room) return;
+
+      const message = {
+        id: 'msg_' + uuidv4(),
+        userId: socket.userId,
+        username: user.displayName,
+        avatar: user.avatar,
+        imageUrl: data.imageUrl,
+        timestamp: new Date().toLocaleTimeString('en-US', {
+          hour: '2-digit',
+          minute: '2-digit'
+        }),
+        date: new Date().toISOString(),
+        isOwner: true,
+        specialBadges: user.specialBadges || [],
+        roomId: socket.currentRoom,
+        isImage: true,
+        isVideo: false
+      };
+
+      room.messages.push(message);
+      
+      if (room.messages.length > 50) {
+        room.messages = room.messages.slice(-50);
+      }
+
+      io.to(socket.currentRoom).emit('new-message', message);
+      setTimeout(() => saveData(), 100);
+
+    } catch (error) {
+      console.error('❌ Image error:', error);
+    }
+  });
+
+  // ───────────────────────────────────────────────────────────
+  // SEND VIDEO (Owner Only)
+  // ───────────────────────────────────────────────────────────
+  socket.on('send-video', async (data) => {
+    try {
+      const user = users.get(socket.userId);
+      if (!user || !user.canSendVideos) {
+        return socket.emit('error', 'No permission');
+      }
+
+      const room = rooms.get(socket.currentRoom);
+      if (!room) return;
+
+      const message = {
+        id: 'msg_' + uuidv4(),
+        userId: socket.userId,
+        username: user.displayName,
+        avatar: user.avatar,
+        videoUrl: data.videoUrl,
+        timestamp: new Date().toLocaleTimeString('en-US', {
+          hour: '2-digit',
+          minute: '2-digit'
+        }),
+        date: new Date().toISOString(),
+        isOwner: true,
+        specialBadges: user.specialBadges || [],
+        roomId: socket.currentRoom,
+        isImage: false,
+        isVideo: true
+      };
+
+      room.messages.push(message);
+      
+      if (room.messages.length > 50) {
+        room.messages = room.messages.slice(-50);
+      }
+
+      io.to(socket.currentRoom).emit('new-message', message);
+      setTimeout(() => saveData(), 100);
+
+    } catch (error) {
+      console.error('❌ Video error:', error);
+    }
+  });
+
+  // ───────────────────────────────────────────────────────────
+  // CHANGE DISPLAY NAME
+  // ───────────────────────────────────────────────────────────
+  socket.on('change-display-name', async (data) => {
+    try {
+      const user = users.get(socket.userId);
+      if (!user) return;
+
+      const newName = data.newName.trim().substring(0, 30);
+      if (!newName) {
+        return socket.emit('error', 'Invalid name');
+      }
+
+      user.displayName = newName;
+      socket.emit('action-success', 'Name changed');
+      
+      updateUsersList(socket.currentRoom);
+      setTimeout(() => saveData(), 100);
+
+    } catch (error) {
+      console.error('❌ Change name error:', error);
     }
   });
 
@@ -559,7 +580,7 @@ io.on('connection', (socket) => {
       setTimeout(() => saveData(), 100);
 
     } catch (error) {
-      console.error('❌ Private message error:', error);
+      console.error('❌ PM error:', error);
     }
   });
 
@@ -644,7 +665,7 @@ io.on('connection', (socket) => {
           id: room.id,
           name: room.name,
           description: room.description,
-          messages: room.messages.slice(-100),
+          messages: room.messages.slice(-50),
           isCreator: room.creatorId === socket.userId,
           isModerator: room.moderators.includes(socket.userId),
           partyMode: systemSettings.partyMode[room.id] || false
@@ -660,7 +681,7 @@ io.on('connection', (socket) => {
       setTimeout(() => saveData(), 100);
 
     } catch (error) {
-      console.error('❌ Join room error:', error);
+      console.error('❌ Join error:', error);
     }
   });
 
@@ -700,7 +721,7 @@ io.on('connection', (socket) => {
       const room = rooms.get(data.roomId);
       if (!room || room.isOfficial) return;
 
-      io.to(data.roomId).emit('room-deleted', { message: 'Room has been deleted' });
+      io.to(data.roomId).emit('room-deleted', { message: 'Room deleted' });
       rooms.delete(data.roomId);
       updateRoomsList();
       setTimeout(() => saveData(), 100);
@@ -719,7 +740,7 @@ io.on('connection', (socket) => {
       if (!room) return;
 
       room.isSilenced = true;
-      io.to(data.roomId).emit('room-silenced', { message: 'Room has been silenced' });
+      io.to(data.roomId).emit('room-silenced', { message: 'Room silenced' });
       setTimeout(() => saveData(), 100);
 
     } catch (error) {
@@ -736,7 +757,7 @@ io.on('connection', (socket) => {
       if (!room) return;
 
       room.isSilenced = false;
-      io.to(data.roomId).emit('room-unsilenced', { message: 'Room has been unsilenced' });
+      io.to(data.roomId).emit('room-unsilenced', { message: 'Room unsilenced' });
       setTimeout(() => saveData(), 100);
 
     } catch (error) {
@@ -753,11 +774,11 @@ io.on('connection', (socket) => {
       if (!room) return;
 
       room.messages = [];
-      io.to(data.roomId).emit('chat-cleaned', { message: 'Chat has been cleaned' });
+      io.to(data.roomId).emit('chat-cleaned', { message: 'Chat cleaned' });
       setTimeout(() => saveData(), 100);
 
     } catch (error) {
-      console.error('❌ Clean chat error:', error);
+      console.error('❌ Clean error:', error);
     }
   });
 
@@ -768,7 +789,7 @@ io.on('connection', (socket) => {
 
       rooms.forEach(room => {
         room.messages = [];
-        io.to(room.id).emit('chat-cleaned', { message: 'All chats cleaned by owner' });
+        io.to(room.id).emit('chat-cleaned', { message: 'All chats cleaned' });
       });
 
       socket.emit('action-success', 'All rooms cleaned');
@@ -793,7 +814,7 @@ io.on('connection', (socket) => {
       const room = rooms.get(data.roomId || socket.currentRoom);
       const canMute = admin.isOwner || (room && room.moderators.includes(socket.userId));
 
-      if (!canMute) return socket.emit('error', 'No permission to mute');
+      if (!canMute) return socket.emit('error', 'No permission');
 
       const duration = parseInt(data.duration) || 0;
       const isPermanent = duration === 0;
@@ -871,7 +892,7 @@ io.on('connection', (socket) => {
 
       bannedUsers.set(data.userId, {
         username: data.username,
-        reason: data.reason || 'Banned by owner',
+        reason: data.reason || 'Banned',
         bannedBy: admin.displayName,
         bannedAt: new Date().toISOString(),
         userIP: socket.userIP
@@ -946,7 +967,6 @@ io.on('connection', (socket) => {
       const targetUser = users.get(data.userId);
       if (!targetUser || targetUser.isOwner) return;
 
-      // Delete all messages from this user
       rooms.forEach(room => {
         room.messages = room.messages.filter(m => m.userId !== data.userId);
         const index = room.users.indexOf(data.userId);
@@ -962,11 +982,11 @@ io.on('connection', (socket) => {
         .find(s => s.userId === data.userId);
       
       if (targetSocket) {
-        targetSocket.emit('account-deleted', { message: 'Your account has been deleted' });
+        targetSocket.emit('account-deleted', { message: 'Account deleted' });
         targetSocket.disconnect(true);
       }
 
-      socket.emit('action-success', `Deleted account: ${targetUser.displayName}`);
+      socket.emit('action-success', `Deleted: ${targetUser.displayName}`);
       updateUsersList(socket.currentRoom);
       setTimeout(() => saveData(), 100);
 
@@ -1053,16 +1073,16 @@ io.on('connection', (socket) => {
       systemSettings.partyMode[data.roomId] = data.enabled;
       
       io.to(data.roomId).emit('party-mode-changed', { enabled: data.enabled });
-      socket.emit('action-success', data.enabled ? 'Party mode ON' : 'Party mode OFF');
+      socket.emit('action-success', data.enabled ? 'Party ON' : 'Party OFF');
       setTimeout(() => saveData(), 100);
 
     } catch (error) {
-      console.error('❌ Party mode error:', error);
+      console.error('❌ Party error:', error);
     }
   });
 
   // ───────────────────────────────────────────────────────────
-  // YOUTUBE & VIDEO PLAYER
+  // YOUTUBE
   // ───────────────────────────────────────────────────────────
   socket.on('start-youtube-watch', async (data) => {
     try {
@@ -1070,7 +1090,7 @@ io.on('connection', (socket) => {
       if (!admin || !admin.isOwner) return;
 
       if (socket.currentRoom !== 'global_cold') {
-        return socket.emit('error', 'YouTube only works in Global Room');
+        return socket.emit('error', 'YouTube only in Global Room');
       }
 
       io.to('global_cold').emit('youtube-started', {
@@ -1112,11 +1132,11 @@ io.on('connection', (socket) => {
       if (data.chatMusicVolume !== undefined) systemSettings.chatMusicVolume = data.chatMusicVolume;
 
       io.emit('settings-updated', systemSettings);
-      socket.emit('action-success', 'Settings saved permanently');
+      socket.emit('action-success', 'Settings saved');
       setTimeout(() => saveData(), 100);
 
     } catch (error) {
-      console.error('❌ Update settings error:', error);
+      console.error('❌ Settings error:', error);
     }
   });
 
@@ -1134,11 +1154,11 @@ io.on('connection', (socket) => {
         fromIP: socket.userIP
       });
 
-      socket.emit('support-message-sent', { message: 'Message sent to owner' });
+      socket.emit('support-message-sent', { message: 'Message sent' });
       setTimeout(() => saveData(), 100);
 
     } catch (error) {
-      console.error('❌ Support message error:', error);
+      console.error('❌ Support error:', error);
     }
   });
 
@@ -1161,7 +1181,7 @@ io.on('connection', (socket) => {
       if (!user || !user.isOwner) return;
 
       supportMessages.delete(data.messageId);
-      socket.emit('action-success', 'Support message deleted');
+      socket.emit('action-success', 'Message deleted');
       setTimeout(() => saveData(), 100);
 
     } catch (error) {
@@ -1191,7 +1211,7 @@ io.on('connection', (socket) => {
 
       socket.emit('muted-list', list);
     } catch (error) {
-      console.error('❌ Get muted list error:', error);
+      console.error('❌ Get muted error:', error);
     }
   });
 
@@ -1211,7 +1231,7 @@ io.on('connection', (socket) => {
 
       socket.emit('banned-list', list);
     } catch (error) {
-      console.error('❌ Get banned list error:', error);
+      console.error('❌ Get banned error:', error);
     }
   });
 
@@ -1275,7 +1295,7 @@ function updateRoomsList(socket = null) {
       io.emit('rooms-list', roomList);
     }
   } catch (error) {
-    console.error('❌ Update rooms list error:', error);
+    console.error('❌ Update rooms error:', error);
   }
 }
 
@@ -1306,7 +1326,7 @@ function updateUsersList(roomId, socket = null) {
       io.to(roomId).emit('users-list', userList);
     }
   } catch (error) {
-    console.error('❌ Update users list error:', error);
+    console.error('❌ Update users error:', error);
   }
 }
 
@@ -1315,23 +1335,23 @@ function updateUsersList(roomId, socket = null) {
 // ═══════════════════════════════════════════════════════════════
 
 process.on('uncaughtException', (error) => {
-  console.error('❌ Uncaught Exception:', error);
+  console.error('❌ Exception:', error);
   saveData();
 });
 
 process.on('unhandledRejection', (error) => {
-  console.error('❌ Unhandled Rejection:', error);
+  console.error('❌ Rejection:', error);
   saveData();
 });
 
 process.on('SIGINT', () => {
-  console.log('\n💾 Saving data before exit...');
+  console.log('\n💾 Saving before exit...');
   saveData();
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
-  console.log('\n💾 Saving data before termination...');
+  console.log('\n💾 Saving before termination...');
   saveData();
   process.exit(0);
 });
@@ -1344,17 +1364,19 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`
 ╔════════════════════════════════════════════════════════════╗
 ║                                                            ║
-║           ❄️  Cold Room Server V2 - Enhanced             ║
+║           ❄️  Cold Room Server V2 - Final                ║
 ║                                                            ║
 ║  Port:        ${PORT.toString().padEnd(44)}║
 ║  Status:      ✅ Running                                  ║
-║  Data:        💾 Persistent Storage Active                ║
-║  Features:    📷 Images, 🎥 Videos, 💬 Chat              ║
+║  Data:        💾 Persistent (Auto-save 30s)               ║
+║  Messages:    📝 Max 50 per room                          ║
 ║  Owner:       👑 COLDKING / ColdKing@2025                 ║
 ║                                                            ║
-║  Railway:     ✅ Optimized for Railway Deployment         ║
-║  Auto-Save:   ✅ Every 30 seconds                         ║
-║  Max Buffer:  100 MB (Video Support)                      ║
+║  Features:    ✅ Images, Videos, YouTube                  ║
+║               ✅ Mute (Temp/Permanent)                    ║
+║               ✅ Moderators, Ban, Party Mode              ║
+║               ✅ Private Messages, Edit Messages          ║
+║               ✅ Change Name, Gender Selection            ║
 ║                                                            ║
 ╚════════════════════════════════════════════════════════════╝
   `);
