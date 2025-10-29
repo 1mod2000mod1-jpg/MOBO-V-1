@@ -1,6 +1,7 @@
-// Cold Room V2 - Complete server.js
-// Single-file complete implementation with one io.on('connection') block.
-// Node >= 14 recommended. Uses express, socket.io, bcryptjs, uuid, fs.
+// ═══════════════════════════════════════════════════════════════
+// Cold Room V3.0 - Complete Enhanced Server
+// © 2025 Cold Room - All Rights Reserved
+// ═══════════════════════════════════════════════════════════════
 
 const express = require('express');
 const http = require('http');
@@ -24,10 +25,8 @@ const PORT = process.env.PORT || 3000;
 app.use(express.static(__dirname));
 app.use(express.json({ limit: '100mb' }));
 
-// Data file
 const DATA_FILE = 'cold_room_data.json';
 
-// Default system settings + data container
 let systemSettings = {
   siteLogo: 'https://j.top4top.io/p_3585vud691.jpg',
   siteTitle: 'Cold Room',
@@ -37,7 +36,7 @@ let systemSettings = {
   loginMusicVolume: 0.5,
   chatMusicVolume: 0.5,
   partyMode: {},
-  youtube: null
+  video: null
 };
 
 let data = {
@@ -48,10 +47,10 @@ let data = {
   bannedIPs: {},
   privateMessages: {},
   supportMessages: {},
+  blockedUsers: {},
   systemSettings
 };
 
-// In-memory structures (Maps)
 const users = new Map();
 const rooms = new Map();
 const mutedUsers = new Map();
@@ -60,15 +59,16 @@ const bannedIPs = new Map();
 const privateMessages = new Map();
 const supportMessages = new Map();
 const onlineUsers = new Map();
+const blockedUsers = new Map();
 
-// Load persisted data if exists
+// Load data
 function loadData() {
   try {
     if (fs.existsSync(DATA_FILE)) {
       const content = fs.readFileSync(DATA_FILE, 'utf8');
       const loaded = JSON.parse(content);
       data = { ...data, ...loaded };
-      // restore maps
+      
       Object.entries(data.users || {}).forEach(([k,v]) => users.set(k, v));
       Object.entries(data.rooms || {}).forEach(([k,v]) => rooms.set(k, v));
       Object.entries(data.mutedUsers || {}).forEach(([k,v]) => mutedUsers.set(k, v));
@@ -76,6 +76,8 @@ function loadData() {
       Object.entries(data.bannedIPs || {}).forEach(([k,v]) => bannedIPs.set(k, v));
       Object.entries(data.privateMessages || {}).forEach(([k,v]) => privateMessages.set(k, v));
       Object.entries(data.supportMessages || {}).forEach(([k,v]) => supportMessages.set(k, v));
+      Object.entries(data.blockedUsers || {}).forEach(([k,v]) => blockedUsers.set(k, new Set(v)));
+      
       systemSettings = loaded.systemSettings || systemSettings;
       console.log('✅ Data loaded from', DATA_FILE);
     } else {
@@ -86,7 +88,7 @@ function loadData() {
   }
 }
 
-// Save (serialize) all Maps to JSON
+// Save data
 function saveData() {
   try {
     const toSave = {
@@ -97,6 +99,9 @@ function saveData() {
       bannedIPs: Object.fromEntries(bannedIPs),
       privateMessages: Object.fromEntries(privateMessages),
       supportMessages: Object.fromEntries(supportMessages),
+      blockedUsers: Object.fromEntries(
+        Array.from(blockedUsers.entries()).map(([k, v]) => [k, Array.from(v)])
+      ),
       systemSettings
     };
     fs.writeFileSync(DATA_FILE, JSON.stringify(toSave, null, 2), 'utf8');
@@ -105,7 +110,7 @@ function saveData() {
   }
 }
 
-// Initialize default owner and global room
+// Initialize owner and global room
 function createOwnerIfMissing() {
   const ownerId = 'owner_cold_001';
   if (!users.has(ownerId)) {
@@ -120,7 +125,9 @@ function createOwnerIfMissing() {
       specialBadges: ['👑'],
       joinDate: new Date().toISOString(),
       canSendImages: true,
-      canSendVideos: true
+      canSendVideos: true,
+      nameChangeCount: 0,
+      profilePicture: null
     };
     users.set(ownerId, owner);
     privateMessages.set(ownerId, {});
@@ -144,13 +151,16 @@ function createGlobalRoomIfMissing() {
       isSilenced: false,
       hasPassword: false,
       password: null,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      videoUrl: null,
+      musicUrl: null,
+      musicVolume: 0.5
     });
     console.log('✅ Global room created');
   }
 }
 
-// Helpers to broadcast lists
+// Broadcast functions
 function updateRoomsList() {
   try {
     const roomsArray = Array.from(rooms.values()).map(r => ({
@@ -179,6 +189,7 @@ function updateUsersList(roomId) {
         id: u.id,
         displayName: u.displayName,
         avatar: u.avatar,
+        profilePicture: u.profilePicture,
         isOwner: !!u.isOwner,
         isModerator: room.moderators.includes(u.id),
         isOnline: onlineUsers.has(u.id)
@@ -190,7 +201,6 @@ function updateUsersList(roomId) {
   }
 }
 
-// Party mode setter
 function setPartyMode(roomId, enabled) {
   systemSettings.partyMode = systemSettings.partyMode || {};
   systemSettings.partyMode[roomId] = !!enabled;
@@ -198,7 +208,7 @@ function setPartyMode(roomId, enabled) {
   saveData();
 }
 
-// Restore data and ensure owner+global room exist
+// Load and initialize
 loadData();
 createOwnerIfMissing();
 createGlobalRoomIfMissing();
@@ -208,7 +218,7 @@ saveData();
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/settings', (req, res) => res.json(systemSettings));
 
-// Single io.on('connection') block — all socket handlers live here
+// Socket handlers
 io.on('connection', (socket) => {
   console.log('🔗 New connection:', socket.id);
   socket.userIP = socket.handshake.address || socket.conn.remoteAddress || '';
@@ -235,11 +245,12 @@ io.on('connection', (socket) => {
       socket.userData = user;
       onlineUsers.set(foundId, Date.now());
 
-      // join global
       const globalRoom = rooms.get('global_cold');
       if (globalRoom && !globalRoom.users.includes(foundId)) globalRoom.users.push(foundId);
       socket.join('global_cold');
       socket.currentRoom = 'global_cold';
+
+      const userBlockedList = blockedUsers.get(foundId) || new Set();
 
       socket.emit('login-success', {
         user: {
@@ -252,16 +263,20 @@ io.on('connection', (socket) => {
           isModerator: globalRoom ? globalRoom.moderators.includes(foundId) : false,
           canSendImages: user.canSendImages,
           canSendVideos: user.canSendVideos,
-          specialBadges: user.specialBadges || []
+          specialBadges: user.specialBadges || [],
+          nameChangeCount: user.nameChangeCount || 0,
+          profilePicture: user.profilePicture
         },
         room: {
           id: globalRoom.id,
           name: globalRoom.name,
           messages: (globalRoom.messages || []).slice(-50),
-          partyMode: systemSettings.partyMode[globalRoom.id] || false
+          partyMode: systemSettings.partyMode[globalRoom.id] || false,
+          moderators: globalRoom.moderators || []
         },
         systemSettings,
-        youtube: systemSettings.youtube
+        video: systemSettings.video,
+        blockedUsers: Array.from(userBlockedList)
       });
 
       updateRoomsList();
@@ -277,7 +292,6 @@ io.on('connection', (socket) => {
       const { username, password, displayName, gender } = payload || {};
       if (!username || !password || !displayName) return socket.emit('register-error', 'Missing fields');
 
-      // unique checks
       for (const u of users.values()) {
         if (u.username.toLowerCase() === username.toLowerCase()) return socket.emit('register-error', 'Username exists');
         if (u.displayName.toLowerCase() === displayName.toLowerCase()) return socket.emit('register-error', 'Display name exists');
@@ -295,14 +309,139 @@ io.on('connection', (socket) => {
         gender: gender || 'unknown',
         specialBadges: [],
         canSendImages: false,
-        canSendVideos: false
+        canSendVideos: false,
+        nameChangeCount: 0,
+        profilePicture: null
       };
       users.set(userId, newUser);
       privateMessages.set(userId, {});
+      blockedUsers.set(userId, new Set());
       saveData();
       socket.emit('register-success', { message: 'Account created!', username });
     } catch (e) {
       console.error('register error', e);
+    }
+  });
+
+  // PROFILE PICTURE
+  socket.on('update-profile-picture', (payload) => {
+    try {
+      const user = users.get(socket.userId);
+      if (!user) return socket.emit('error', 'Not authenticated');
+      
+      user.profilePicture = payload.profilePicture || null;
+      saveData();
+      
+      socket.emit('profile-updated', {
+        userId: socket.userId,
+        profilePicture: user.profilePicture,
+        message: 'Profile picture updated'
+      });
+      
+      if (socket.currentRoom) updateUsersList(socket.currentRoom);
+    } catch (e) {
+      console.error('update-profile-picture error', e);
+    }
+  });
+
+  // NAME CHANGE
+  socket.on('change-display-name', (payload) => {
+    try {
+      const user = users.get(socket.userId);
+      if (!user) return socket.emit('error', 'Not authenticated');
+      
+      const newName = (payload.newName || '').toString().trim();
+      if (!newName || newName.length < 3 || newName.length > 30) {
+        return socket.emit('error', 'Name must be 3-30 characters');
+      }
+
+      for (const [id, u] of users.entries()) {
+        if (id !== socket.userId && u.displayName.toLowerCase() === newName.toLowerCase()) {
+          return socket.emit('error', 'Display name already taken');
+        }
+      }
+
+      if (user.isOwner) {
+        user.displayName = newName;
+        socket.emit('action-success', 'Name changed successfully');
+        saveData();
+        if (socket.currentRoom) updateUsersList(socket.currentRoom);
+        return;
+      }
+
+      const changeCount = user.nameChangeCount || 0;
+      if (changeCount >= 2) {
+        return socket.emit('error', 'Maximum free changes used. Submit a request instead.');
+      }
+
+      user.displayName = newName;
+      user.nameChangeCount = changeCount + 1;
+      
+      const remaining = 2 - user.nameChangeCount;
+      socket.emit('action-success', `Name changed! ${remaining} free changes remaining`);
+      saveData();
+      if (socket.currentRoom) updateUsersList(socket.currentRoom);
+    } catch (e) {
+      console.error('change-display-name error', e);
+    }
+  });
+
+  socket.on('request-name-change', (payload) => {
+    try {
+      const user = users.get(socket.userId);
+      if (!user) return socket.emit('error', 'Not authenticated');
+      
+      const id = 'namechange_' + uuidv4();
+      supportMessages.set(id, {
+        id,
+        type: 'name_change_request',
+        from: user.displayName,
+        userId: socket.userId,
+        currentName: user.displayName,
+        requestedName: (payload.newName || '').toString().trim(),
+        message: `Name change request: "${user.displayName}" → "${payload.newName}"`,
+        sentAt: new Date().toISOString(),
+        fromIP: socket.userIP || ''
+      });
+      saveData();
+      socket.emit('action-success', 'Name change request sent to owner');
+    } catch (e) {
+      console.error('request-name-change error', e);
+    }
+  });
+
+  socket.on('approve-name-change', (payload) => {
+    try {
+      const admin = users.get(socket.userId);
+      if (!admin?.isOwner) return socket.emit('error', 'No permission');
+      
+      const request = supportMessages.get(payload.requestId);
+      if (!request || request.type !== 'name_change_request') {
+        return socket.emit('error', 'Request not found');
+      }
+
+      const targetUser = users.get(request.userId);
+      if (!targetUser) return socket.emit('error', 'User not found');
+
+      for (const [id, u] of users.entries()) {
+        if (id !== request.userId && u.displayName.toLowerCase() === request.requestedName.toLowerCase()) {
+          return socket.emit('error', 'Name already taken');
+        }
+      }
+
+      targetUser.displayName = request.requestedName;
+      supportMessages.delete(payload.requestId);
+      saveData();
+      
+      const targetSocket = Array.from(io.sockets.sockets.values()).find(s => s.userId === request.userId);
+      if (targetSocket) {
+        targetSocket.emit('action-success', `Your name has been changed to: ${request.requestedName}`);
+        if (targetSocket.currentRoom) updateUsersList(targetSocket.currentRoom);
+      }
+      
+      socket.emit('action-success', 'Name change approved');
+    } catch (e) {
+      console.error('approve-name-change error', e);
     }
   });
 
@@ -313,7 +452,6 @@ io.on('connection', (socket) => {
       const room = rooms.get(socket.currentRoom);
       if (!user || !room) return socket.emit('error', 'Not in room or not authenticated');
 
-      // check muted
       const mute = mutedUsers.get(socket.userId);
       if (mute && mute.expires && Date.now() > mute.expires) mutedUsers.delete(socket.userId);
       if (mutedUsers.has(socket.userId)) return socket.emit('error', 'You are muted');
@@ -323,6 +461,7 @@ io.on('connection', (socket) => {
         userId: socket.userId,
         username: user.displayName,
         avatar: user.avatar,
+        profilePicture: user.profilePicture,
         text: (payload.text || '').toString().substring(0, 1000),
         timestamp: new Date().toLocaleTimeString(),
         date: new Date().toISOString(),
@@ -343,7 +482,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // EDIT MESSAGE (user can edit only own messages)
+  // EDIT MESSAGE
   socket.on('edit-message', (payload) => {
     try {
       const room = rooms.get(socket.currentRoom);
@@ -359,7 +498,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // SEND IMAGE (permission-controlled)
+  // SEND IMAGE
   socket.on('send-image', (payload) => {
     try {
       const user = users.get(socket.userId);
@@ -371,6 +510,7 @@ io.on('connection', (socket) => {
         userId: socket.userId,
         username: user.displayName,
         avatar: user.avatar,
+        profilePicture: user.profilePicture,
         imageUrl: payload.imageUrl || '',
         timestamp: new Date().toLocaleTimeString(),
         date: new Date().toISOString(),
@@ -389,7 +529,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // SEND VIDEO (permission-controlled)
+  // SEND VIDEO
   socket.on('send-video', (payload) => {
     try {
       const user = users.get(socket.userId);
@@ -401,6 +541,7 @@ io.on('connection', (socket) => {
         userId: socket.userId,
         username: user.displayName,
         avatar: user.avatar,
+        profilePicture: user.profilePicture,
         videoUrl: payload.videoUrl || '',
         timestamp: new Date().toLocaleTimeString(),
         date: new Date().toISOString(),
@@ -419,7 +560,12 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ROOM MANAGEMENT: create, join, update, delete, clean
+  // Continue in next part...
+      // ═══════════════════════════════════════════════════════════════
+// Cold Room V3.0 - Server Part 2 (Continuation)
+// ═══════════════════════════════════════════════════════════════
+
+  // ROOM MANAGEMENT
   socket.on('create-room', (payload) => {
     try {
       const user = users.get(socket.userId);
@@ -438,7 +584,10 @@ io.on('connection', (socket) => {
         password: payload.password ? bcrypt.hashSync(payload.password.toString(), 10) : null,
         moderators: [],
         isSilenced: false,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        videoUrl: null,
+        musicUrl: null,
+        musicVolume: 0.5
       };
       rooms.set(roomId, newRoom);
       socket.join(roomId);
@@ -464,7 +613,6 @@ io.on('connection', (socket) => {
         }
       }
 
-      // leave previous
       if (socket.currentRoom) {
         const prev = rooms.get(socket.currentRoom);
         if (prev) prev.users = (prev.users || []).filter(u => u !== socket.userId);
@@ -483,9 +631,10 @@ io.on('connection', (socket) => {
           messages: (room.messages || []).slice(-50),
           isCreator: room.creatorId === socket.userId,
           isModerator: room.moderators.includes(socket.userId),
-          partyMode: systemSettings.partyMode[room.id] || false
+          partyMode: systemSettings.partyMode[room.id] || false,
+          moderators: room.moderators || []
         },
-        youtube: systemSettings.youtube
+        video: systemSettings.video
       });
 
       updateUsersList(room.id);
@@ -557,7 +706,57 @@ io.on('connection', (socket) => {
     }
   });
 
-  // MODERATION: mute/unmute/ban/unban/moderator management
+  // ROOM MEDIA SETTINGS
+  socket.on('get-room-media', (payload) => {
+    try {
+      const room = rooms.get(payload.roomId);
+      if (!room) return socket.emit('error', 'Room not found');
+      socket.emit('room-media-data', {
+        roomId: room.id,
+        videoUrl: room.videoUrl,
+        musicUrl: room.musicUrl,
+        musicVolume: room.musicVolume || 0.5
+      });
+    } catch (e) {
+      console.error('get-room-media error', e);
+    }
+  });
+
+  socket.on('update-room-media', (payload) => {
+    try {
+      const admin = users.get(socket.userId);
+      if (!admin?.isOwner) return socket.emit('error', 'No permission');
+      
+      const room = rooms.get(payload.roomId);
+      if (!room) return socket.emit('error', 'Room not found');
+
+      if (payload.type === 'video') {
+        room.videoUrl = payload.videoUrl || null;
+        io.to(payload.roomId).emit('room-media-updated', {
+          roomId: payload.roomId,
+          type: 'video',
+          videoUrl: room.videoUrl,
+          message: room.videoUrl ? 'Room video updated' : 'Room video removed'
+        });
+      } else if (payload.type === 'music') {
+        room.musicUrl = payload.musicUrl || null;
+        room.musicVolume = payload.musicVolume || 0.5;
+        io.to(payload.roomId).emit('room-media-updated', {
+          roomId: payload.roomId,
+          type: 'music',
+          musicUrl: room.musicUrl,
+          musicVolume: room.musicVolume,
+          message: room.musicUrl ? 'Room music updated' : 'Room music removed'
+        });
+      }
+
+      saveData();
+    } catch (e) {
+      console.error('update-room-media error', e);
+    }
+  });
+
+  // MODERATION
   socket.on('mute-user', (payload) => {
     try {
       const admin = users.get(socket.userId);
@@ -565,7 +764,7 @@ io.on('connection', (socket) => {
       if (!admin || !target) return socket.emit('error', 'Invalid user');
       if (target.isOwner) return socket.emit('error', 'Cannot mute owner');
 
-      const durationMin = parseInt(payload.duration) || 0; // 0 -> permanent
+      const durationMin = parseInt(payload.duration) || 0;
       const expires = durationMin > 0 ? Date.now() + durationMin * 60000 : null;
       mutedUsers.set(payload.userId, {
         username: target.displayName,
@@ -586,9 +785,25 @@ io.on('connection', (socket) => {
 
   socket.on('unmute-user', (payload) => {
     try {
-      mutedUsers.delete(payload.userId);
-      saveData();
-      socket.emit('action-success', 'User unmuted');
+      const admin = users.get(socket.userId);
+      if (!admin) return socket.emit('error', 'Not authenticated');
+      
+      const muteInfo = mutedUsers.get(payload.userId);
+      if (!muteInfo) return socket.emit('action-success', 'User not muted');
+
+      if (admin.isOwner) {
+        mutedUsers.delete(payload.userId);
+        saveData();
+        return socket.emit('action-success', 'User unmuted');
+      }
+
+      if (admin.isModerator && (muteInfo.mutedById === socket.userId || !muteInfo.byOwner)) {
+        mutedUsers.delete(payload.userId);
+        saveData();
+        return socket.emit('action-success', 'User unmuted');
+      }
+
+      socket.emit('error', 'You can only unmute users you muted');
     } catch (e) {
       console.error('unmute-user error', e);
     }
@@ -607,7 +822,6 @@ io.on('connection', (socket) => {
         bannedAt: Date.now()
       });
       saveData();
-      // disconnect target if online
       const tSocket = Array.from(io.sockets.sockets.values()).find(s => s.userId === payload.userId);
       if (tSocket) {
         try { tSocket.emit('banned', { reason: payload.reason || 'Violation' }); tSocket.disconnect(true); } catch {}
@@ -659,6 +873,11 @@ io.on('connection', (socket) => {
       const receiver = users.get(payload.toUserId);
       if (!sender || !receiver) return socket.emit('error', 'Invalid users');
 
+      const receiverBlocked = blockedUsers.get(payload.toUserId) || new Set();
+      if (receiverBlocked.has(socket.userId)) {
+        return socket.emit('error', 'You are blocked by this user');
+      }
+
       const message = {
         id: 'pm_' + uuidv4(),
         from: socket.userId,
@@ -670,19 +889,16 @@ io.on('connection', (socket) => {
         edited: false
       };
 
-      // store for sender
       if (!privateMessages.has(socket.userId)) privateMessages.set(socket.userId, {});
       const smap = privateMessages.get(socket.userId);
       if (!smap[payload.toUserId]) smap[payload.toUserId] = [];
       smap[payload.toUserId].push(message);
 
-      // store for receiver (mirror)
       if (!privateMessages.has(payload.toUserId)) privateMessages.set(payload.toUserId, {});
       const rmap = privateMessages.get(payload.toUserId);
       if (!rmap[socket.userId]) rmap[socket.userId] = [];
       rmap[socket.userId].push(message);
 
-      // notify receiver if online
       const receiverSocket = Array.from(io.sockets.sockets.values()).find(s => s.userId === payload.toUserId);
       if (receiverSocket) receiverSocket.emit('new-private-message', message);
 
@@ -701,6 +917,34 @@ io.on('connection', (socket) => {
       console.error('get-private-messages error', e);
     }
   });
+
+  socket.on('block-user', (payload) => {
+    try {
+      if (!blockedUsers.has(socket.userId)) blockedUsers.set(socket.userId, new Set());
+      blockedUsers.get(socket.userId).add(payload.userId);
+      saveData();
+      socket.emit('action-success', 'User blocked');
+    } catch (e) {
+      console.error('block-user error', e);
+    }
+  });
+
+  socket.on('unblock-user', (payload) => {
+    try {
+      if (blockedUsers.has(socket.userId)) {
+        blockedUsers.get(socket.userId).delete(payload.userId);
+        saveData();
+      }
+      socket.emit('action-success', 'User unblocked');
+    } catch (e) {
+      console.error('unblock-user error', e);
+    }
+  });
+
+  // Continue to final part...
+      // ═══════════════════════════════════════════════════════════════
+// Cold Room V3.0 - Server Final Part
+// ═══════════════════════════════════════════════════════════════
 
   // SUPPORT MESSAGES
   socket.on('send-support-message', (payload) => {
@@ -742,7 +986,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // LISTS: rooms, users, muted, banned
+  // LISTS
   socket.on('get-rooms', () => {
     try {
       const roomList = Array.from(rooms.values()).map(room => ({
@@ -776,6 +1020,7 @@ io.on('connection', (socket) => {
           username: u.username,
           displayName: u.displayName,
           avatar: u.avatar,
+          profilePicture: u.profilePicture,
           isOnline: onlineUsers.has(u.id),
           isOwner: !!u.isOwner,
           isModerator: room.moderators.includes(u.id),
@@ -791,8 +1036,14 @@ io.on('connection', (socket) => {
   socket.on('get-muted-list', () => {
     try {
       const user = users.get(socket.userId);
-      if (!user?.isOwner) return socket.emit('error', 'No permission');
-      const list = Array.from(mutedUsers.entries()).map(([uid, info]) => ({ userId: uid, ...info }));
+      if (!user || (!user.isOwner && !user.isModerator)) return socket.emit('error', 'No permission');
+      
+      let list = Array.from(mutedUsers.entries()).map(([uid, info]) => ({ userId: uid, ...info }));
+      
+      if (user.isModerator && !user.isOwner) {
+        list = list.filter(item => item.mutedById === socket.userId || !item.byOwner);
+      }
+      
       socket.emit('muted-list', list);
     } catch (e) {
       console.error('get-muted-list error', e);
@@ -810,7 +1061,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // DELETE ACCOUNT (owner)
+  // DELETE ACCOUNT
   socket.on('delete-account', (payload) => {
     try {
       const admin = users.get(socket.userId);
@@ -828,6 +1079,7 @@ io.on('connection', (socket) => {
       privateMessages.delete(payload.userId);
       mutedUsers.delete(payload.userId);
       bannedUsers.delete(payload.userId);
+      blockedUsers.delete(payload.userId);
 
       const targetSocket = Array.from(io.sockets.sockets.values()).find(s => s.userId === payload.userId);
       if (targetSocket) {
@@ -841,7 +1093,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // DELETE MESSAGE (owner)
+  // DELETE MESSAGE
   socket.on('delete-message', (payload) => {
     try {
       const admin = users.get(socket.userId);
@@ -856,50 +1108,108 @@ io.on('connection', (socket) => {
     }
   });
 
-  // PING / disconnect handlers
-  socket.on('ping', () => {
-    try {
-      if (socket.userId) onlineUsers.set(socket.userId, Date.now());
-    } catch (e) {
-      console.error('ping error', e);
-    }
-  });
-
-  socket.on('disconnect', () => {
-    try {
-      if (socket.userId) {
-        onlineUsers.delete(socket.userId);
-        rooms.forEach(room => {
-          room.users = (room.users || []).filter(u => u !== socket.userId);
-        });
-      }
-      console.log('🔌 Disconnect:', socket.id);
-    } catch (e) {
-      console.error('disconnect error', e);
-    }
-  });
-
-  // SETTINGS update from owner (kept here inside connection to send immediate ack)
-  socket.on('update-settings', (payload) => {
+  // BULK OPERATIONS
+  socket.on('unmute-multiple', (payload) => {
     try {
       const user = users.get(socket.userId);
       if (!user?.isOwner) return socket.emit('error', 'No permission');
-      if (payload.siteLogo !== undefined) systemSettings.siteLogo = payload.siteLogo;
-      if (payload.siteTitle !== undefined) systemSettings.siteTitle = payload.siteTitle;
-      if (payload.backgroundColor !== undefined) systemSettings.backgroundColor = payload.backgroundColor;
-      if (payload.loginMusic !== undefined) systemSettings.loginMusic = payload.loginMusic;
-      if (payload.chatMusic !== undefined) systemSettings.chatMusic = payload.chatMusic;
-      if (payload.loginMusicVolume !== undefined) systemSettings.loginMusicVolume = Number(payload.loginMusicVolume) || 0.5;
-      if (payload.chatMusicVolume !== undefined) systemSettings.chatMusicVolume = Number(payload.chatMusicVolume) || 0.5;
-      io.emit('settings-updated', systemSettings);
+      (payload.userIds || []).forEach(uid => mutedUsers.delete(uid));
       saveData();
-      socket.emit('action-success', 'Settings updated');
+      socket.emit('action-success', 'Users unmuted');
     } catch (e) {
-      console.error('update-settings error', e);
+      console.error('unmute-multiple error', e);
     }
   });
 
-  // Party mode toggle (owner or room moderator)
+  socket.on('unban-multiple', (payload) => {
+    try {
+      const user = users.get(socket.userId);
+      if (!user?.isOwner) return socket.emit('error', 'No permission');
+      (payload.userIds || []).forEach(uid => bannedUsers.delete(uid));
+      saveData();
+      socket.emit('action-success', 'Users unbanned');
+    } catch (e) {
+      console.error('unban-multiple error', e);
+    }
+  });
+
+  // ROOM CONTROLS
+  socket.on('silence-room', (payload) => {
+    try {
+      const admin = users.get(socket.userId);
+      if (!admin?.isOwner) return socket.emit('error', 'No permission');
+      const room = rooms.get(payload.roomId);
+      if (!room) return socket.emit('error', 'Room not found');
+      room.isSilenced = true;
+      io.to(payload.roomId).emit('room-silenced', { message: 'Room silenced', forceDisable: true });
+      saveData();
+    } catch (e) {
+      console.error('silence-room error', e);
+    }
+  });
+
+  socket.on('unsilence-room', (payload) => {
+    try {
+      const admin = users.get(socket.userId);
+      if (!admin?.isOwner) return socket.emit('error', 'No permission');
+      const room = rooms.get(payload.roomId);
+      if (!room) return socket.emit('error', 'Room not found');
+      room.isSilenced = false;
+      io.to(payload.roomId).emit('room-unsilenced', { message: 'Room unsilenced' });
+      saveData();
+    } catch (e) {
+      console.error('unsilence-room error', e);
+    }
+  });
+
+  // VIDEO WATCH
+  socket.on('start-video-watch', (payload) => {
+    try {
+      const user = users.get(socket.userId);
+      if (!user?.isOwner) return socket.emit('error', 'No permission');
+      if (!payload || !payload.url) return socket.emit('error', 'Missing video URL');
+      
+      systemSettings.video = {
+        url: payload.url.toString(),
+        type: payload.type || 'youtube',
+        startedAt: Date.now(),
+        size: payload.size || 'medium',
+        startedBy: user.displayName
+      };
+      
+      io.to('global_cold').emit('video-started', systemSettings.video);
+      saveData();
+    } catch (e) {
+      console.error('start-video-watch error', e);
+    }
+  });
+
+  socket.on('stop-video-watch', () => {
+    try {
+      const user = users.get(socket.userId);
+      if (!user?.isOwner) return socket.emit('error', 'No permission');
+      systemSettings.video = null;
+      io.to('global_cold').emit('video-stopped');
+      saveData();
+    } catch (e) {
+      console.error('stop-video-watch error', e);
+    }
+  });
+
+  socket.on('video-resize', (payload) => {
+    try {
+      const user = users.get(socket.userId);
+      if (!user?.isOwner) return socket.emit('error', 'No permission');
+      if (!systemSettings.video) return socket.emit('error', 'No video session');
+      systemSettings.video.size = payload.size || systemSettings.video.size || 'medium';
+      io.to('global_cold').emit('video-resize', { size: systemSettings.video.size });
+      saveData();
+    } catch (e) {
+      console.error('video-resize error', e);
+    }
+  });
+
+  // PARTY MODE
   socket.on('toggle-party-mode', (payload) => {
     try {
       const user = users.get(socket.userId);
@@ -913,83 +1223,61 @@ io.on('connection', (socket) => {
     }
   });
 
-  // YouTube watch together controls (owner)
-  socket.on('start-youtube-watch', (payload) => {
+  // SETTINGS
+  socket.on('update-settings', (payload) => {
     try {
       const user = users.get(socket.userId);
       if (!user?.isOwner) return socket.emit('error', 'No permission');
-      if (!payload || !payload.videoId) return socket.emit('error', 'Missing videoId');
-      systemSettings.youtube = {
-        videoId: payload.videoId.toString(),
-        startedAt: Date.now(),
-        size: payload.size || 'medium',
-        startedBy: user.displayName
-      };
-      io.to('global_cold').emit('youtube-started', systemSettings.youtube);
+      
+      if (payload.siteLogo !== undefined) systemSettings.siteLogo = payload.siteLogo;
+      if (payload.siteTitle !== undefined) systemSettings.siteTitle = payload.siteTitle;
+      if (payload.backgroundColor !== undefined) systemSettings.backgroundColor = payload.backgroundColor;
+      if (payload.loginMusic !== undefined) {
+        systemSettings.loginMusic = payload.loginMusic;
+        io.emit('settings-updated', systemSettings);
+      }
+      if (payload.chatMusic !== undefined) {
+        systemSettings.chatMusic = payload.chatMusic;
+        io.emit('settings-updated', systemSettings);
+      }
+      if (payload.loginMusicVolume !== undefined) systemSettings.loginMusicVolume = Number(payload.loginMusicVolume) || 0.5;
+      if (payload.chatMusicVolume !== undefined) systemSettings.chatMusicVolume = Number(payload.chatMusicVolume) || 0.5;
+      
+      if (payload.loginMusic === undefined && payload.chatMusic === undefined) {
+        io.emit('settings-updated', systemSettings);
+      }
+      
       saveData();
+      socket.emit('action-success', 'Settings updated');
     } catch (e) {
-      console.error('start-youtube-watch error', e);
+      console.error('update-settings error', e);
     }
   });
 
-  socket.on('stop-youtube-watch', () => {
+  // PING
+  socket.on('ping', () => {
     try {
-      const user = users.get(socket.userId);
-      if (!user?.isOwner) return socket.emit('error', 'No permission');
-      systemSettings.youtube = null;
-      io.to('global_cold').emit('youtube-stopped');
-      saveData();
+      if (socket.userId) onlineUsers.set(socket.userId, Date.now());
     } catch (e) {
-      console.error('stop-youtube-watch error', e);
+      console.error('ping error', e);
     }
   });
 
-  socket.on('youtube-resize', (payload) => {
+  // DISCONNECT
+  socket.on('disconnect', () => {
     try {
-      const user = users.get(socket.userId);
-      if (!user?.isOwner) return socket.emit('error', 'No permission');
-      if (!systemSettings.youtube) return socket.emit('error', 'No youtube session');
-      systemSettings.youtube.size = payload.size || systemSettings.youtube.size || 'medium';
-      io.to('global_cold').emit('youtube-resize', { size: systemSettings.youtube.size });
-      saveData();
+      if (socket.userId) {
+        onlineUsers.delete(socket.userId);
+        rooms.forEach(room => {
+          room.users = (room.users || []).filter(u => u !== socket.userId);
+        });
+      }
+      console.log('🔌 Disconnect:', socket.id);
     } catch (e) {
-      console.error('youtube-resize error', e);
+      console.error('disconnect error', e);
     }
   });
-
-  socket.on('get-youtube-state', () => {
-    try {
-      socket.emit('youtube-state', systemSettings.youtube || null);
-    } catch (e) {
-      console.error('get-youtube-state error', e);
-    }
-  });
-}); // END io.on('connection')
-
-// Utility: reset data (dev)
-function resetAllData() {
-  users.clear();
-  rooms.clear();
-  mutedUsers.clear();
-  bannedUsers.clear();
-  bannedIPs.clear();
-  privateMessages.clear();
-  supportMessages.clear();
-  systemSettings = {
-    siteLogo: 'https://j.top4top.io/p_3585vud691.jpg',
-    siteTitle: 'Cold Room',
-    backgroundColor: 'blue',
-    loginMusic: '',
-    chatMusic: '',
-    loginMusicVolume: 0.5,
-    chatMusicVolume: 0.5,
-    partyMode: {},
-    youtube: null
-  };
-  createOwnerIfMissing();
-  createGlobalRoomIfMissing();
-  saveData();
-}
+});
 
 // Periodic autosave
 setInterval(() => {
@@ -998,5 +1286,11 @@ setInterval(() => {
 
 // Start server
 server.listen(PORT, () => {
-  console.log(`🚀 Cold Room server running on port ${PORT}`);
+  console.log(`🚀 Cold Room V3.0 server running on port ${PORT}`);
+  console.log(`✅ All features enabled and ready!`);
 });
+
+// ═══════════════════════════════════════════════════════════════
+// END - Cold Room V3.0 Complete Server
+// © 2025 Cold Room - All Rights Reserved
+// ═══════════════════════════════════════════════════════════════
