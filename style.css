@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Cold Room V2 - Complete Professional Styling (Fixed)
+   Cold Room V3.0 - Complete Professional Styling (Enhanced)
    © 2025 Cold Room - All Rights Reserved
    ═══════════════════════════════════════════════════════════════ */
 
@@ -36,6 +36,18 @@ body.black-theme {
     --glass-border: rgba(255, 255, 255, 0.1);
     --scrollbar-thumb: #666666;
     --scrollbar-track: rgba(255, 255, 255, 0.02);
+}
+
+/* Red Glass Theme */
+body.red-theme {
+    --primary-bg: linear-gradient(135deg, #1a0000 0%, #4a0000 50%, #1a0000 100%);
+    --ice-blue: #dc2626;
+    --deep-blue: #7f1d1d;
+    --light-blue: #fca5a5;
+    --glass-bg: rgba(139, 0, 0, 0.2);
+    --glass-border: rgba(220, 38, 38, 0.3);
+    --scrollbar-thumb: #dc2626;
+    --scrollbar-track: rgba(255, 0, 0, 0.05);
 }
 
 body {
@@ -75,6 +87,11 @@ body {
     user-select: none;
 }
 
+body.red-theme .snowflake {
+    color: #ff4500;
+    text-shadow: 0 0 10px #ff4500, 0 0 20px #ff0000;
+}
+
 @keyframes fall {
     to {
         transform: translateY(100vh) rotate(360deg);
@@ -89,7 +106,7 @@ body {
     transform: translateX(-50%);
     z-index: 1;
     pointer-events: none;
-    opacity: 0.15;
+    opacity: 0.25;
     transition: opacity 0.3s ease;
 }
 
@@ -430,6 +447,33 @@ select.modern-input {
     padding: 0.5rem 1rem;
     background: rgba(255, 255, 255, 0.05);
     border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.user-status:hover {
+    background: rgba(255, 255, 255, 0.1);
+    transform: translateY(-2px);
+}
+
+.current-user-avatar-container {
+    position: relative;
+    width: 45px;
+    height: 45px;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 3px solid var(--ice-blue);
+    background: linear-gradient(135deg, var(--ice-blue), var(--deep-blue));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.user-profile-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
 }
 
 .current-user-avatar {
@@ -444,6 +488,36 @@ select.modern-input {
     display: flex;
     gap: 0.5rem;
     flex-wrap: wrap;
+}
+
+/* Profile Settings */
+.profile-preview {
+    text-align: center;
+    margin-bottom: 2rem;
+}
+
+.profile-avatar-large {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    margin: 0 auto 1rem;
+    border: 4px solid var(--ice-blue);
+    overflow: hidden;
+    background: linear-gradient(135deg, var(--ice-blue), var(--deep-blue));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+.profile-avatar-large img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.profile-avatar-large span {
+    font-size: 4rem;
 }
 
 /* Badges */
@@ -617,6 +691,17 @@ select.modern-input {
     font-size: 1.5rem;
     background: linear-gradient(135deg, var(--ice-blue), var(--deep-blue));
     box-shadow: 0 3px 10px rgba(74, 144, 226, 0.3);
+    overflow: hidden;
+    position: relative;
+}
+
+.user-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    position: absolute;
+    top: 0;
+    left: 0;
 }
 
 .online-indicator {
@@ -665,72 +750,104 @@ select.modern-input {
     scroll-behavior: smooth;
 }
 
-/* YouTube player */
-#youtube-player-container {
-    padding: 1rem;
-    background: rgba(0, 0, 0, 0.8);
+/* Video player */
+.video-minimized {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 60px;
+    height: 60px;
+    background: var(--ice-blue);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    cursor: pointer;
+    z-index: 1000;
+    box-shadow: 0 5px 20px rgba(0, 0, 0, 0.5);
+    transition: all 0.3s ease;
+    animation: pulse 2s infinite;
+}
+
+.video-minimized:hover {
+    transform: scale(1.1);
+}
+
+.video-player-container {
+    position: relative;
+    padding: 0;
+    background: transparent;
     border-radius: 15px;
-    margin: 1rem auto;
+    margin: 0 auto 1rem auto;
     text-align: center;
     max-width: 680px;
-    z-index: 2; /* sit above background but below modals */
-    position: relative;
+    z-index: 2;
 }
 
-#youtube-player-container.size-small {
+.video-player-container.size-small {
     max-width: 360px;
 }
-#youtube-player-container.size-small #youtube-player {
-    width: 320px;
-    height: 180px;
-}
 
-#youtube-player-container.size-medium {
+.video-player-container.size-medium {
     max-width: 520px;
 }
-#youtube-player-container.size-medium #youtube-player {
-    width: 480px;
-    height: 270px;
-}
 
-#youtube-player-container.size-large {
+.video-player-container.size-large {
     max-width: 680px;
 }
-#youtube-player-container.size-large #youtube-player {
-    width: 640px;
-    height: 360px;
+
+.video-header {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 10;
 }
 
-#youtube-player {
-    border-radius: 10px;
+.video-control-btn {
+    background: rgba(0, 0, 0, 0.7);
+    border: 2px solid var(--ice-blue);
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    font-size: 1.2rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.video-control-btn:hover {
+    background: var(--ice-blue);
+    transform: scale(1.1);
+}
+
+#video-content {
+    border-radius: 15px;
     overflow: hidden;
     max-width: 100%;
-    margin: 0 auto;
-    display: block;
 }
 
-.youtube-controls {
+#video-content iframe,
+#video-content video {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16/9;
+    border: none;
+    border-radius: 15px;
+}
+
+.video-controls {
     display: flex;
     gap: 0.5rem;
     justify-content: center;
-    margin-top: 1rem;
+    margin-top: 0.5rem;
     flex-wrap: wrap;
-}
-
-@media (max-width: 768px) {
-    #youtube-player-container.size-large,
-    #youtube-player-container.size-medium,
-    #youtube-player-container.size-small {
-        max-width: 100%;
-        padding: 0.5rem;
-    }
-    #youtube-player-container.size-large #youtube-player,
-    #youtube-player-container.size-medium #youtube-player,
-    #youtube-player-container.size-small #youtube-player {
-        width: 100%;
-        height: auto;
-        aspect-ratio: 16/9;
-    }
+    padding: 0.5rem;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 10px;
 }
 
 /* Welcome message */
@@ -776,6 +893,12 @@ select.modern-input {
     align-self: flex-start;
 }
 
+.message.my-message {
+    align-self: flex-end;
+    background: linear-gradient(135deg, rgba(74, 144, 226, 0.3), rgba(74, 144, 226, 0.1));
+    border-left: 4px solid var(--ice-blue);
+}
+
 .message:hover {
     transform: translateX(5px);
     border-color: var(--ice-blue);
@@ -803,6 +926,24 @@ select.modern-input {
     font-weight: 700;
     font-size: 0.95rem;
     color: var(--light-blue);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.message-user-avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 2px solid var(--ice-blue);
+    display: inline-block;
+}
+
+.message-user-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 
 .message-text {
@@ -937,6 +1078,10 @@ select.modern-input {
 
 .modal-content.owner-modal {
     max-width: 1000px;
+}
+
+#moderator-panel-modal .modal-content {
+    max-width: 700px;
 }
 
 @keyframes slideUp {
@@ -1087,14 +1232,14 @@ select.modern-input {
 
 /* Actions Menu */
 .actions-menu {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
+    position: fixed !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) !important;
     z-index: 10001;
     min-width: 320px;
     max-width: 400px;
-    animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    animation: none !important;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 }
 
@@ -1170,6 +1315,9 @@ select.modern-input {
     border-bottom: 2px solid var(--glass-border);
     margin-bottom: 1rem;
     color: var(--light-blue);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
 .private-messages {
@@ -1180,6 +1328,9 @@ select.modern-input {
     border-radius: 10px;
     margin-bottom: 1rem;
     background: rgba(0, 0, 0, 0.2);
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
 }
 
 .private-input-area {
@@ -1187,7 +1338,9 @@ select.modern-input {
     gap: 0.8rem;
 }
 
-.private-input-area textarea { flex: 1; }
+.private-input-area textarea { 
+    flex: 1; 
+}
 
 .private-user-item {
     padding: 1rem;
@@ -1208,10 +1361,9 @@ select.modern-input {
     transform: translateX(5px);
 }
 
-.my-message {
-    align-self: flex-end;
-    background: rgba(74, 144, 226, 0.2);
-    border-left: 4px solid #4a90e2;
+.private-user-item.blocked {
+    opacity: 0.5;
+    background: rgba(239, 68, 68, 0.1);
 }
 
 /* Party mode */
@@ -1270,8 +1422,8 @@ body.party-mode {
     #snowman-canvas { display: none; }
     .modal-content { width: 95%; }
     .actions-menu { min-width: 90%; }
-    #youtube-player-container.size-large #youtube-player,
-    #youtube-player-container.size-medium #youtube-player { width: 100%; height: auto; aspect-ratio: 16/9; }
+    .video-player-container.size-large,
+    .video-player-container.size-medium { max-width: 100%; }
 }
 
 @media (max-width: 480px) {
@@ -1288,6 +1440,7 @@ body.party-mode {
     .header-logo-image { width: 40px; height: 40px; }
     .header-logo h1 { font-size: 1.2rem; }
     .room-info { font-size: 0.75rem; }
+    .current-user-avatar-container { width: 40px; height: 40px; }
     .current-user-avatar { font-size: 1.5rem; }
     .user-status { padding: 0.4rem 0.8rem; font-size: 0.85rem; }
     .actions-menu-header { font-size: 1.1rem; }
@@ -1337,7 +1490,7 @@ img { image-rendering: -webkit-optimize-contrast; -webkit-user-drag: none; user-
 }
 
 /* Footer comment
-   © 2025 Cold Room - All Rights Reserved
-   Professional Chat Platform - Complete Fixed Style System
-   Version: 2.1 Synced & Polished
+   © 2025 Cold Room V3.0 - All Rights Reserved
+   Professional Chat Platform - Complete Enhanced System
+   Version: 3.0 - With Profile Pictures & Advanced Features
 */
