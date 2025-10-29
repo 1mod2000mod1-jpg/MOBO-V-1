@@ -1,10 +1,11 @@
 {
-  "name": "cold-room-chat-v2",
-  "version": "2.2.0",
-  "description": "Cold Room - Premium Chat Platform V2 - Enhanced Edition (All Features Fixed)",
+  "name": "cold-room-chat-v3",
+  "version": "3.0.0",
+  "description": "Cold Room - Premium Chat Platform V3.0 - Complete Enhanced Edition with Profile Pictures, Room Media & Advanced Features",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node server.js"
   },
   "engines": {
     "node": ">=14.0.0"
@@ -22,8 +23,20 @@
     "websocket",
     "persistent",
     "complete",
-    "enhanced"
+    "enhanced",
+    "profile-pictures",
+    "room-media",
+    "advanced-features",
+    "v3"
   ],
   "author": "Cold Room King",
-  "license": "PROPRIETARY"
+  "license": "PROPRIETARY",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/cold-room-v3"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/cold-room-v3/issues"
+  },
+  "homepage": "https://github.com/yourusername/cold-room-v3#readme"
 }
