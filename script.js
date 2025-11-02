@@ -1,26 +1,696 @@
+// ═══════════════════════════════════════════════════════════════
+// Cold Room V3.0 - COMPLETE FIXED CLIENT
+// © 2025 Cold Room - All Rights Reserved
+// ═══════════════════════════════════════════════════════════════
+
+console.log('❄️ Cold Room V3.0 Loading...');
+
+let socket = null;
+let currentUser = null;
+let currentRoom = null;
+let systemSettings = {};
+let selectedUserId = null;
+let selectedUsername = null;
+let currentPrivateChatUser = null;
+let editingRoomId = null;
+let isReconnecting = false;
+let longPressTimer = null;
+
+document.addEventListener('DOMContentLoaded', async function() {
+    console.log('✅ DOM Ready');
+    
+    if (typeof io === 'undefined') {
+        console.error('❌ Socket.io not loaded!');
+        showAlert('Failed to load Socket.io. Please refresh.', 'error');
+        return;
+    }
+    
+    await fetchInitialSettings();
+    initializeSocket();
+    setupEventListeners();
+    createHypnoticSpiral();
+    
+    console.log('✅ Cold Room Initialized');
+});
+
+async function fetchInitialSettings() {
+    try {
+        const res = await fetch('/settings');
+        if (res.ok) {
+            systemSettings = await res.json();
+            applySiteSettings();
+            updateMusicPlayers();
+        }
+    } catch (e) {
+        console.log('Settings fetch skipped');
+    }
+}
+
+function initializeSocket() {
+    try {
+        socket = io({
+            transports: ['websocket', 'polling'],
+            reconnection: true,
+            reconnectionDelay: 1000,
+            reconnectionAttempts: Infinity,
+            timeout: 20000
+        });
+        
+        setupSocketListeners();
+        console.log('✅ Socket initialized');
+    } catch (e) {
+        console.error('Socket init failed:', e);
+        showAlert('Connection failed', 'error');
+    }
+}
+
+function setupSocketListeners() {
+    if (!socket) return;
+    
+    socket.on('connect', () => {
+        console.log('✅ Connected');
+        isReconnecting = false;
+        hideLoading();
+        if (currentUser && currentRoom) {
+            socket.emit('join-room', { roomId: currentRoom });
+            showNotification('✅ Reconnected');
+        }
+    });
+
+    socket.on('disconnect', () => {
+        if (!isReconnecting) {
+            showNotification('⚠️ Reconnecting...');
+            isReconnecting = true;
+        }
+    });
+
+    socket.on('reconnect', () => {
+        isReconnecting = false;
+        if (currentUser && currentRoom) {
+            socket.emit('join-room', { roomId: currentRoom });
+        }
+    });
+
+    socket.on('login-success', handleLoginSuccess);
+    socket.on('login-error', (msg) => { hideLoading(); showAlert(msg || 'Login failed', 'error'); });
+    socket.on('banned-user', (data) => {
+        hideLoading();
+        showAlert('Banned: ' + data.reason, 'error');
+        document.getElementById('support-section').style.display = 'block';
+    });
+    socket.on('register-success', (data) => {
+        hideLoading();
+        showAlert(data.message || 'Account created!', 'success');
+        document.getElementById('login-username').value = data.username || '';
+    });
+    socket.on('register-error', (msg) => { hideLoading(); showAlert(msg || 'Registration failed', 'error'); });
+
+    socket.on('new-message', (msg) => {
+        if (msg.roomId === currentRoom) { 
+            addMessage(msg); 
+            scrollToBottom(); 
+        }
+    });
+    
+    socket.on('message-edited', (data) => {
+        const el = document.querySelector('[data-message-id="' + data.messageId + '"] .message-text');
+        if (el) el.innerHTML = esc(data.newText) + ' <small>(edited)</small>';
+    });
+
+    socket.on('new-private-message', (msg) => {
+        if (currentPrivateChatUser === msg.from) {
+            addPrivateMessage(msg);
+        }
+        showNotification('💬 ' + msg.fromName);
+    });
+    
+    socket.on('private-message-sent', addPrivateMessage);
+    socket.on('private-messages-list', (d) => displayPrivateMessages(d.messages, d.withUserId));
+
+    socket.on('room-joined', handleRoomJoined);
+    socket.on('room-created', (d) => {
+        showAlert('Room created!', 'success');
+        socket.emit('join-room', { roomId: d.roomId });
+        hideModal('create-room-modal');
+    });
+    socket.on('room-updated', (d) => {
+        document.getElementById('room-info').textContent = d.name;
+        showNotification('Room updated');
+    });
+
+    socket.on('users-list', updateUsersList);
+    socket.on('rooms-list', updateRoomsList);
+    socket.on('user-joined', (d) => showNotification(d.username + ' joined'));
+
+    socket.on('message-deleted', (d) => {
+        const el = document.querySelector('[data-message-id="' + d.messageId + '"]');
+        if (el) el.remove();
+    });
+    
+    socket.on('chat-cleaned', (d) => { clearMessages(); showAlert(d.message, 'info'); });
+    
+    socket.on('room-silenced', (d) => {
+        const disabled = d.forceDisable !== undefined ? d.forceDisable : true;
+        document.getElementById('message-input').disabled = disabled && !currentUser?.isOwner;
+        document.querySelector('#message-form button').disabled = disabled && !currentUser?.isOwner;
+        showAlert(d.message, 'warning');
+    });
+    
+    socket.on('room-unsilenced', (d) => {
+        document.getElementById('message-input').disabled = false;
+        document.querySelector('#message-form button').disabled = false;
+        showAlert(d.message, 'success');
+    });
+    
+    socket.on('room-deleted', (d) => {
+        showAlert(d.message, 'error');
+        socket.emit('join-room', { roomId: 'global_cold' });
+    });
+
+    socket.on('party-mode-changed', (d) => {
+        if (d.roomId === currentRoom) {
+            togglePartyEffects(d.enabled);
+            showNotification(d.enabled ? '🎉 Party ON!' : 'Party OFF');
+        }
+    });
+
+    socket.on('room-media-updated', (d) => {
+        if (d.roomId === currentRoom) {
+            handleRoomMediaUpdate(d);
+        }
+    });
+
+    socket.on('profile-updated', (d) => {
+        if (d.userId === currentUser?.id) {
+            currentUser.profilePicture = d.profilePicture;
+            updateCurrentUserAvatar();
+        }
+        showAlert(d.message, 'success');
+    });
+
+    socket.on('action-success', (msg) => showAlert(msg, 'success'));
+    socket.on('error', (msg) => showAlert(msg || 'Error', 'error'));
+    
+    socket.on('banned', (d) => {
+        showAlert('Banned: ' + d.reason, 'error');
+        setTimeout(() => logout(true), 3000);
+    });
+    
+    socket.on('account-deleted', (d) => {
+        showAlert(d.message, 'error');
+        setTimeout(() => logout(true), 2000);
+    });
+
+    socket.on('settings-updated', (s) => {
+        systemSettings = s;
+        applySiteSettings();
+        updateMusicPlayers();
+        showAlert('Settings updated', 'info');
+    });
+
+    socket.on('support-message-sent', (d) => showAlert(d.message, 'success'));
+    socket.on('support-messages-list', displaySupportMessages);
+    socket.on('muted-list', displayMutedList);
+    socket.on('banned-list', displayBannedList);
+}
+
+function setupEventListeners() {
+    const messageForm = document.getElementById('message-form');
+    if (messageForm) {
+        messageForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            sendMessage();
+        });
+    }
+
+    const messageInput = document.getElementById('message-input');
+    if (messageInput) {
+        messageInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+    }
+
+    const privateInput = document.getElementById('private-message-input');
+    if (privateInput) {
+        privateInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendPrivateMessage();
+            }
+        });
+    }
+
+    const loginPassword = document.getElementById('login-password');
+    if (loginPassword) {
+        loginPassword.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') login();
+        });
+    }
+    
+    const registerPassword = document.getElementById('register-password');
+    if (registerPassword) {
+        registerPassword.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') register();
+        });
+    }
+}
+
+window.login = function() {
+    if (!socket || !socket.connected) {
+        showAlert('Connecting...', 'warning');
+        setTimeout(login, 1000);
+        return;
+    }
+    
+    const username = document.getElementById('login-username').value.trim();
+    const password = document.getElementById('login-password').value.trim();
+    
+    if (!username || !password) {
+        return showAlert('Enter username and password', 'error');
+    }
+    
+    showLoading('Logging in...');
+    socket.emit('login', { username: username, password: password });
+};
+
+window.register = function() {
+    if (!socket || !socket.connected) {
+        showAlert('Connecting...', 'warning');
+        setTimeout(register, 1000);
+        return;
+    }
+    
+    const username = document.getElementById('register-username').value.trim();
+    const password = document.getElementById('register-password').value.trim();
+    const displayName = document.getElementById('register-displayname').value.trim();
+    const gender = document.getElementById('register-gender').value;
+
+    if (!username || !password || !displayName || !gender) {
+        return showAlert('Fill all fields', 'error');
+    }
+    
+    if (username.length < 3 || username.length > 20) {
+        return showAlert('Username: 3-20 characters', 'error');
+    }
+    
+    if (password.length < 6) {
+        return showAlert('Password: 6+ characters', 'error');
+    }
+    
+    if (displayName.length < 3 || displayName.length > 30) {
+        return showAlert('Display name: 3-30 characters', 'error');
+    }
+
+    showLoading('Creating account...');
+    socket.emit('register', { username: username, password: password, displayName: displayName, gender: gender });
+};
+
+window.sendSupportMessage = function() {
+    const message = document.getElementById('support-message').value.trim();
+    if (!message) return showAlert('Write your message', 'error');
+    
+    if (!socket || !socket.connected) {
+        return showAlert('Not connected', 'error');
+    }
+    
+    socket.emit('send-support-message', {
+        from: document.getElementById('login-username').value || 'Anonymous',
+        message: message
+    });
+    document.getElementById('support-message').value = '';
+};
+
+window.logout = function(forced) {
+    if (forced || confirm('Logout?')) {
+        showLoading('Logging out...');
+        if (socket) socket.disconnect();
+        setTimeout(() => location.reload(), 1000);
+    }
+};
+
+function handleLoginSuccess(data) {
+    try {
+        currentUser = data.user;
+        currentUser.isModerator = data.room.moderators?.includes(currentUser.id) || false;
+        currentRoom = data.room.id;
+        systemSettings = data.systemSettings;
+
+        document.getElementById('current-user-name').textContent = currentUser.displayName;
+        updateCurrentUserAvatar();
+        updateUserBadges();
+
+        document.getElementById('login-screen').classList.remove('active');
+        document.getElementById('chat-screen').classList.add('active');
+
+        stopLoginMusic();
+        playChatMusic();
+        hideLoading();
+        showAlert('Welcome ' + currentUser.displayName + '! ❄️', 'success');
+
+        clearMessages();
+        data.room.messages.forEach(addMessage);
+
+        document.getElementById('message-input').disabled = false;
+        document.querySelector('#message-form button').disabled = false;
+
+        socket.emit('get-rooms');
+        socket.emit('get-users', { roomId: currentRoom });
+
+        if (currentUser.isOwner) {
+            document.getElementById('owner-panel-btn').style.display = 'inline-block';
+            document.getElementById('owner-tools').style.display = 'flex';
+        }
+
+        if (data.room.partyMode) togglePartyEffects(true);
+
+        applySiteSettings();
+        startHeartbeat();
+        createHypnoticSpiral();
+    } catch (e) {
+        console.error('Login success error:', e);
+    }
+}
+
+function handleRoomJoined(data) {
+    currentRoom = data.room.id;
+    document.getElementById('room-info').textContent = data.room.name;
+    
+    clearMessages();
+    data.room.messages.forEach(addMessage);
+    
+    document.getElementById('message-input').disabled = false;
+    document.querySelector('#message-form button').disabled = false;
+    
+    togglePartyEffects(data.room.partyMode || false);
+    socket.emit('get-users', { roomId: currentRoom });
+    scrollToBottom();
+}
+
+window.showProfileSettings = function() {
+    const modal = document.getElementById('profile-settings-modal');
+    if (!modal) return;
+    modal.classList.add('active');
+    
+    const previewImg = document.getElementById('profile-preview-img');
+    const previewEmoji = document.getElementById('profile-preview-emoji');
+    
+    if (currentUser.profilePicture) {
+        previewImg.src = currentUser.profilePicture;
+        previewImg.style.display = 'block';
+        previewEmoji.style.display = 'none';
+    } else {
+        previewImg.style.display = 'none';
+        previewEmoji.style.display = 'block';
+        previewEmoji.textContent = currentUser.avatar;
+    }
+    
+    document.getElementById('profile-preview-name').textContent = currentUser.displayName;
+    document.getElementById('profile-picture-url').value = currentUser.profilePicture || '';
+};
+
+window.updateProfilePicture = function() {
+    const url = document.getElementById('profile-picture-url').value.trim();
+    if (!url) return showAlert('Enter image URL', 'error');
+    
+    socket.emit('update-profile-picture', { profilePicture: url });
+    hideModal('profile-settings-modal');
+};
+
+window.removeProfilePicture = function() {
+    socket.emit('update-profile-picture', { profilePicture: null });
+    hideModal('profile-settings-modal');
+};
+
+window.changeName = function() {
+    const newName = prompt('New display name:', currentUser.displayName);
+    if (newName && newName.trim() && newName.trim() !== currentUser.displayName) {
+        socket.emit('change-display-name', { newName: newName.trim() });
+    }
+};
+
+function updateCurrentUserAvatar() {
+    const avatarImg = document.getElementById('current-user-avatar-img');
+    const avatarEmoji = document.getElementById('current-user-avatar');
+    
+    if (!avatarImg || !avatarEmoji) return;
+    
+    if (currentUser.profilePicture) {
+        avatarImg.src = currentUser.profilePicture;
+        avatarImg.style.display = 'block';
+        avatarEmoji.style.display = 'none';
+    } else {
+        avatarImg.style.display = 'none';
+        avatarEmoji.style.display = 'block';
+        avatarEmoji.textContent = currentUser.avatar;
+    }
+}
+
+function updateUserBadges() {
+    const container = document.getElementById('user-badges');
+    if (!container) return;
+    let badges = '';
+    if (currentUser.isOwner) badges += '<span class="badge owner-badge">👑 Owner</span>';
+    container.innerHTML = badges;
+}
+
+function sendMessage() {
+    const textarea = document.getElementById('message-input');
+    const text = textarea.value.trim();
+    if (!text) return;
+    if (!socket || !socket.connected) return showAlert('Reconnecting...', 'warning');
+    
+    socket.emit('send-message', { text: text, roomId: currentRoom });
+    textarea.value = '';
+}
+
+function addMessage(message) {
+    const container = document.getElementById('messages');
+    if (!container) return;
+
+    const welcomeMsg = container.querySelector('.welcome-message');
+    if (welcomeMsg) welcomeMsg.remove();
+
+    const messageDiv = document.createElement('div');
+    const isMyMessage = message.userId === currentUser?.id;
+    messageDiv.className = 'message ' + (message.isOwner ? 'owner-message ' : '') + (isMyMessage ? 'my-message' : '');
+    messageDiv.setAttribute('data-message-id', message.id);
+
+    let badges = '';
+    if (message.isOwner) badges += '<span class="badge owner-badge">👑</span>';
+    else if (message.isModerator) badges += '<span class="badge moderator-badge">⭐</span>';
+
+    let avatarHTML = '';
+    if (message.profilePicture) {
+        avatarHTML = '<img src="' + esc(message.profilePicture) + '" alt="avatar" class="message-profile-pic">';
+    } else {
+        avatarHTML = '<span class="message-avatar-emoji">' + esc(message.avatar) + '</span>';
+    }
+
+    let messageHTML = '';
+    
+    if (message.isVideo) {
+        messageHTML = '<div class="message-container"><div class="message-avatar">' + avatarHTML + '</div><div class="message-content"><div class="message-header"><span class="message-user">' + esc(message.username) + badges + '</span></div><div class="message-video"><video controls style="max-width: 100%; border-radius: 10px;"><source src="' + esc(message.videoUrl) + '" type="video/mp4"></video></div><div class="message-footer"><span class="message-time">' + message.timestamp + '</span></div></div></div>';
+    } else if (message.isImage) {
+        messageHTML = '<div class="message-container"><div class="message-avatar">' + avatarHTML + '</div><div class="message-content"><div class="message-header"><span class="message-user">' + esc(message.username) + badges + '</span></div><div class="message-image"><img src="' + esc(message.imageUrl) + '" alt="Image" style="max-width: 100%; border-radius: 10px;"></div><div class="message-footer"><span class="message-time">' + message.timestamp + '</span></div></div></div>';
+    } else {
+        messageHTML = '<div class="message-container"><div class="message-avatar">' + avatarHTML + '</div><div class="message-content"><div class="message-header"><span class="message-user">' + esc(message.username) + badges + '</span></div><div class="message-text">' + esc(message.text) + (message.edited ? ' <small>(edited)</small>' : '') + '</div><div class="message-footer"><span class="message-time">' + message.timestamp + '</span></div></div></div>';
+    }
+
+    messageDiv.innerHTML = messageHTML;
+
+    messageDiv.style.cursor = 'pointer';
+    messageDiv.addEventListener('click', (e) => {
+        if (!e.target.closest('.badge') && !e.target.closest('video') && !e.target.closest('img')) {
+            selectedUserId = message.userId;
+            selectedUsername = message.username;
+            showMessageActions(message);
+        }
+    });
+
+    container.appendChild(messageDiv);
+    scrollToBottom();
+}
+
+function showMessageActions(message) {
+    const actions = [];
+
+    if (!message.isImage && !message.isVideo && message.userId === currentUser?.id) {
+        actions.push({ 
+            text: '✏️ Edit', 
+            action: () => editMessage(message.id, message.text) 
+        });
+    }
+
+    actions.push({ text: '📝 Change My Name', action: changeName });
+    actions.push({ text: '🖼️ Profile Settings', action: showProfileSettings });
+
+    if (currentUser?.isOwner) {
+        if (message.userId !== currentUser.id) {
+            actions.push({ text: '👑 Add Moderator', action: addModerator });
+            actions.push({ text: '⭐ Remove Moderator', action: removeModerator });
+            actions.push({ text: '🔇 Mute User', action: showMuteDialog });
+            actions.push({ text: '🚫 Ban User', action: banUser });
+            actions.push({ text: '🗑️ Delete Account', action: deleteAccount });
+        }
+        actions.push({ text: '❌ Delete Message', action: () => deleteMessage(message.id) });
+    } else if (currentUser?.isModerator && message.userId !== currentUser.id) {
+        actions.push({ text: '🔇 Mute User', action: showMuteDialog });
+    }
+
+    if (message.userId !== currentUser?.id) {
+        actions.push({ text: '💬 Private Message', action: () => openPrivateChat(selectedUserId) });
+    }
+
+    actions.push({ text: '❌ Cancel', action: hideActionsMenu });
+    showActionsMenu(actions);
+}
+
+function editMessage(messageId, currentText) {
+    const newText = prompt('Edit message:', currentText || '');
+    if (newText && newText.trim() && newText.trim() !== currentText) {
+        socket.emit('edit-message', { messageId: messageId, newText: newText.trim() });
+    }
+}
+
+function deleteMessage(messageId) {
+    socket.emit('delete-message', { messageId: messageId, roomId: currentRoom });
+}
+
+window.showMuteDialog = function() {
+    const duration = prompt('Mute ' + selectedUsername + ' for minutes? (0 = permanent):', '10');
+    if (duration === null) return;
+    const reason = prompt('Reason:', 'Rule violation');
+    if (!reason) return;
+    socket.emit('mute-user', {
+        userId: selectedUserId,
+        username: selectedUsername,
+        duration: parseInt(duration),
+        reason: reason,
+        roomId: currentRoom
+    });
+};
+
+window.banUser = function() {
+    if (!confirm('Ban ' + selectedUsername + '?')) return;
+    const reason = prompt('Reason:', 'Serious violation');
+    if (reason) socket.emit('ban-user', { userId: selectedUserId, username: selectedUsername, reason: reason });
+};
+
+window.deleteAccount = function() {
+    if (!confirm('⚠️ DELETE ' + selectedUsername + '? This CANNOT be undone!')) return;
+    socket.emit('delete-account', { userId: selectedUserId });
+};
+
+window.addModerator = function() {
+    if (!confirm('Add ' + selectedUsername + ' as moderator?')) return;
+    socket.emit('add-moderator', { userId: selectedUserId, username: selectedUsername, roomId: currentRoom });
+};
+
+window.removeModerator = function() {
+    if (!confirm('Remove ' + selectedUsername + ' from moderators?')) return;
+    socket.emit('remove-moderator', { userId: selectedUserId, username: selectedUsername, roomId: currentRoom });
+};
+
+function showActionsMenu(actions) {
+    const menu = document.getElementById('message-actions-menu');
+    const list = document.getElementById('message-actions-list');
+    list.innerHTML = '';
+    
+    actions.forEach(action => {
+        const btn = document.createElement('button');
+        btn.className = 'action-menu-btn';
+        btn.textContent = action.text;
+        btn.onclick = (e) => { 
+            e.stopPropagation();
+            hideActionsMenu(); 
+            action.action(); 
+        };
+        list.appendChild(btn);
+    });
+
+    menu.style.display = 'flex';
+}
+
+function hideActionsMenu() {
+    document.getElementById('message-actions-menu').style.display = 'none';
+}
+
+window.showImageUpload = () => document.getElementById('image-upload-modal').classList.add('active');
+window.sendImageMessage = function() {
+    const url = document.getElementById('image-url-input').value.trim();
+    if (!url) return showAlert('Enter image URL', 'error');
+    socket.emit('send-image', { imageUrl: url });
+    document.getElementById('image-url-input').value = '';
+    hideModal('image-upload-modal');
+};
+
+window.showVideoUpload = () => document.getElementById('video-upload-modal').classList.add('active');
+window.sendVideoMessage = function() {
+    const url = document.getElementById('video-url-input').value.trim();
+    if (!url) return showAlert('Enter video URL', 'error');
+    if (!url.toLowerCase().endsWith('.mp4')) return showAlert('MP4 only', 'error');
+    socket.emit('send-video', { videoUrl: url });
+    document.getElementById('video-url-input').value = '';
+    hideModal('video-upload-modal');
+};
+
+window.showPrivateMessages = function() {
+    document.getElementById('private-messages-modal').classList.add('active');
+    loadPrivateUsersList();
+};
+
+function loadPrivateUsersList() {
+    const container = document.getElementById('private-users-list');
+    container.innerHTML = '';
+    socket.emit('get-users', { roomId: currentRoom });
+    socket.once('users-list', (users) => {
+        users.forEach(user => {
+            if (user.id === currentUser?.id) return;
+            const div = document.createElement('div');
+            div.className = 'private-user-item';
+            div.dataset.userId = user.id;
+            div.dataset.userName = user.displayName;
+            
+            let avatarHTML = '';
+            if (user.profilePicture) {
+                avatarHTML = '<div class="user-avatar"><img src="' + esc(user.profilePicture) + '"></div>';
+            } else {
+                avatarHTML = '<div class="user-avatar"><span>' + esc(user.avatar) + '</span></div>';
+            }
+            
+            div.innerHTML = avatarHTML + '<span>' + esc(user.displayName) + '</span>';
+            div.onclick = () => openPrivateChat(user.id);
+            container.appendChild(div);
+        });
+    });
+}
+
+function openPrivateChat(userId) {
+    if (userId === 'owner_cold_001' && currentUser.id !== 'owner_cold_001') {
+        showAlert('Cannot block or message owner directly', 'error');
+        return;
+    }
+    
+    currentPrivateChatUser = userId;
+    socket.emit('get-private-messages', { withUserId: userId });
+    document.getElementById('private-messages-modal').classList.add('active');
+    
+    const user = Array.from(document.querySelectorAll('.user-item'))
+        .find(el => el.dataset.userId === userId);
+    if (user) {
+        document.getElementById('private-header').textContent = 'Chat with ' + user.dataset.userName;
+    }
+}
+
 window.sendPrivateMessage = function() {
     const input = document.getElementById('private-message-input');
     const text = input.value.trim();
     if (!text || !currentPrivateChatUser) return;
     socket.emit('send-private-message', { toUserId: currentPrivateChatUser, text: text });
     input.value = '';
-};
-
-window.toggleBlockUser = function() {
-    if (!currentPrivateChatUser) return;
-    
-    if (blockedUsers.has(currentPrivateChatUser)) {
-        socket.emit('unblock-user', { userId: currentPrivateChatUser });
-        blockedUsers.delete(currentPrivateChatUser);
-        showAlert('User unblocked', 'success');
-        document.getElementById('block-user-btn').textContent = '🚫 Block';
-    } else {
-        socket.emit('block-user', { userId: currentPrivateChatUser });
-        blockedUsers.add(currentPrivateChatUser);
-        showAlert('User blocked', 'success');
-        document.getElementById('block-user-btn').textContent = '✅ Unblock';
-        hideModal('private-messages-modal');
-    }
 };
 
 function displayPrivateMessages(messages, withUserId) {
@@ -118,7 +788,6 @@ function updateRoomsList(rooms) {
         if (currentUser && (currentUser.isOwner || room.creatorId === currentUser.id)) {
             div.addEventListener('mousedown', () => {
                 longPressTimer = setTimeout(() => {
-                    selectedRoomForActions = room;
                     showRoomActions(room);
                 }, 800);
             });
@@ -128,7 +797,6 @@ function updateRoomsList(rooms) {
             div.addEventListener('touchstart', (e) => {
                 longPressTimer = setTimeout(() => {
                     e.preventDefault();
-                    selectedRoomForActions = room;
                     showRoomActions(room);
                 }, 800);
             });
@@ -251,7 +919,6 @@ window.showRoomMediaSettings = function() {
     if (!currentUser?.isOwner) return showAlert('Owner only', 'error');
     document.getElementById('room-media-modal').classList.add('active');
     document.getElementById('current-room-name').textContent = document.getElementById('room-info').textContent;
-    socket.emit('get-room-media', { roomId: currentRoom });
 };
 
 window.updateRoomVideo = function() {
@@ -280,57 +947,7 @@ window.removeRoomMusic = function() {
 };
 
 function handleRoomMediaUpdate(data) {
-    if (data.type === 'video') {
-        if (data.videoUrl) {
-            showRoomVideo(data.videoUrl);
-        } else {
-            hideRoomVideo();
-        }
-    } else if (data.type === 'music') {
-        handleRoomMusic({ musicUrl: data.musicUrl, musicVolume: data.musicVolume });
-    }
     showAlert(data.message, 'success');
-}
-
-function showRoomVideo(url) {
-    const container = document.createElement('div');
-    container.id = 'room-video-container';
-    container.className = 'room-video-player';
-    container.innerHTML = '<div class="video-header-bar"><span>Room Video</span><button class="video-close-btn" onclick="hideRoomVideo()">✕</button></div><div class="video-content">' + (detectVideoType(url) === 'youtube' ? '<iframe src="https://www.youtube.com/embed/' + extractYoutubeId(url) + '" allowfullscreen></iframe>' : '<video controls><source src="' + url + '" type="video/mp4"></video>') + '</div>';
-    
-    const existing = document.getElementById('room-video-container');
-    if (existing) existing.remove();
-    
-    document.querySelector('.chat-messages').appendChild(container);
-}
-
-function hideRoomVideo() {
-    const container = document.getElementById('room-video-container');
-    if (container) container.remove();
-}
-
-function handleRoomMusic(roomData) {
-    const audio = document.getElementById('room-music');
-    if (roomData.musicUrl) {
-        audio.src = roomData.musicUrl;
-        audio.volume = roomData.musicVolume || 0.5;
-        audio.loop = true;
-        audio.play().catch(() => {});
-    } else {
-        audio.pause();
-        audio.src = '';
-    }
-}
-
-function detectVideoType(url) {
-    if (url.includes('youtube.com') || url.includes('youtu.be')) return 'youtube';
-    if (url.toLowerCase().endsWith('.mp4')) return 'mp4';
-    return 'mp4';
-}
-
-function extractYoutubeId(url) {
-    const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&]+)/);
-    return match ? match[1] : url;
 }
 
 window.togglePartyMode = function() {
@@ -350,12 +967,6 @@ window.showOwnerPanel = function() {
     document.getElementById('owner-panel-modal').classList.add('active');
     switchOwnerTab('muted');
     loadRoomsForClean();
-};
-
-window.showModeratorPanel = function() {
-    document.getElementById('moderator-panel-modal').classList.add('active');
-    socket.emit('get-muted-list');
-    socket.once('muted-list', displayModMutedList);
 };
 
 window.switchOwnerTab = function(tabName) {
@@ -490,40 +1101,8 @@ function displaySupportMessages(messages) {
     });
 }
 
-function displayModMutedList(list) {
-    const container = document.getElementById('mod-muted-list');
-    if (!container) return;
-    container.innerHTML = '';
-    if (list.length === 0) {
-        container.innerHTML = '<div style="text-align:center;padding:2rem;">No muted users</div>';
-        return;
-    }
-    list.forEach(item => {
-        const div = document.createElement('div');
-        div.className = 'owner-item';
-        div.innerHTML = '<div class="owner-item-header"><div><input type="checkbox" class="mod-muted-checkbox" data-user-id="' + item.userId + '"><strong>' + esc(item.username) + '</strong></div><button class="modern-btn small" onclick="unmute(\'' + item.userId + '\')">Unmute</button></div>';
-        container.appendChild(div);
-    });
-}
-
-window.unmute = function(userId) {
-    socket.emit('unmute-user', { userId: userId });
-    setTimeout(() => socket.emit('get-muted-list'), 500);
-};
-
-window.unban = function(userId) {
-    socket.emit('unban-user', { userId: userId });
-    setTimeout(() => socket.emit('get-banned-list'), 500);
-};
-
-window.deleteSupportMessage = function(messageId) {
-    socket.emit('delete-support-message', { messageId: messageId });
-    setTimeout(() => socket.emit('get-support-messages'), 500);
-};
-
 window.selectAllMuted = () => document.querySelectorAll('.muted-checkbox').forEach(cb => cb.checked = true);
 window.selectAllBanned = () => document.querySelectorAll('.banned-checkbox').forEach(cb => cb.checked = true);
-window.selectAllModMuted = () => document.querySelectorAll('.mod-muted-checkbox').forEach(cb => cb.checked = true);
 
 window.unmuteSelected = function() {
     const selected = Array.from(document.querySelectorAll('.muted-checkbox:checked')).map(cb => cb.dataset.userId);
@@ -543,16 +1122,19 @@ window.unbanSelected = function() {
     }
 };
 
-window.unmuteModSelected = function() {
-    const selected = Array.from(document.querySelectorAll('.mod-muted-checkbox:checked')).map(cb => cb.dataset.userId);
-    if (selected.length === 0) return showAlert('Select users first', 'error');
-    if (confirm('Unmute ' + selected.length + ' users?')) {
-        selected.forEach(userId => socket.emit('unmute-user', { userId: userId }));
-        setTimeout(() => {
-            socket.emit('get-muted-list');
-            socket.once('muted-list', displayModMutedList);
-        }, 500);
-    }
+window.unmute = function(userId) {
+    socket.emit('unmute-user', { userId: userId });
+    setTimeout(() => socket.emit('get-muted-list'), 500);
+};
+
+window.unban = function(userId) {
+    socket.emit('unban-user', { userId: userId });
+    setTimeout(() => socket.emit('get-banned-list'), 500);
+};
+
+window.deleteSupportMessage = function(messageId) {
+    socket.emit('delete-support-message', { messageId: messageId });
+    setTimeout(() => socket.emit('get-support-messages'), 500);
 };
 
 window.hideModal = (modalId) => document.getElementById(modalId).classList.remove('active');
@@ -619,14 +1201,10 @@ function applySiteSettings() {
     document.getElementById('main-title').textContent = systemSettings.siteTitle;
     document.getElementById('header-title').textContent = systemSettings.siteTitle;
 
-    document.body.classList.remove('black-theme', 'red-theme');
+    document.body.classList.remove('black-theme');
     if (systemSettings.backgroundColor === 'black') {
         document.body.classList.add('black-theme');
-    } else if (systemSettings.backgroundColor === 'red') {
-        document.body.classList.add('red-theme');
     }
-
-    updateSnowmanTheme();
 }
 
 function updateMusicPlayers() {
@@ -644,6 +1222,13 @@ function updateMusicPlayers() {
     }
 }
 
+window.playLoginMusic = function() {
+    const audio = document.getElementById('login-music');
+    if (audio && audio.src) {
+        audio.play().catch(() => {});
+    }
+};
+
 function stopLoginMusic() {
     const audio = document.getElementById('login-music');
     if (audio) {
@@ -652,783 +1237,63 @@ function stopLoginMusic() {
     }
 }
 
+window.playChatMusic = function() {
+    const audio = document.getElementById('chat-music');
+    if (audio && audio.src) {
+        audio.play().catch(() => {});
+    }
+};
+
 function startHeartbeat() {
     setInterval(() => {
         if (socket && socket.connected) socket.emit('ping');
     }, 30000);
 }
 
-function createSnowfall() {
-    const container = document.getElementById('snowflakes');
-    if (!container) return;
-    container.innerHTML = '';
+function createHypnoticSpiral() {
+    const canvas = document.getElementById('hypnotic-spiral');
+    if (!canvas) return;
     
-    const isRedTheme = document.body.classList.contains('red-theme');
-    const symbol = isRedTheme ? '🔥' : '❄';
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
     
-    for (let i = 0; i < 50; i++) {
-        const snowflake = document.createElement('div');
-        snowflake.className = 'snowflake';
-        snowflake.textContent = symbol;
-        snowflake.style.cssText = 'left: ' + (Math.random() * 100) + '%; animation-duration: ' + (Math.random() * 3 + 2) + 's; animation-delay: ' + (Math.random() * 5) + 's; font-size: ' + (Math.random() * 10 + 10) + 'px;';
-        // ═══════════════════════════════════════════════════════════════
-// Cold Room V3.0 - COMPLETE CLIENT (Fixed)
-// © 2025 Cold Room - All Rights Reserved
-// ═══════════════════════════════════════════════════════════════
-
-console.log('❄️ Cold Room V3.0 Loading...');
-
-let socket = null;
-let currentUser = null;
-let currentRoom = null;
-let systemSettings = {};
-let selectedUserId = null;
-let selectedUsername = null;
-let currentPrivateChatUser = null;
-let confirmCallback = null;
-let editingRoomId = null;
-let isReconnecting = false;
-let blockedUsers = new Set();
-let replyToMessage = null;
-let longPressTimer = null;
-let selectedRoomForActions = null;
-
-document.addEventListener('DOMContentLoaded', async function() {
-    console.log('✅ DOM Ready');
+    let rotation = 0;
     
-    if (typeof io === 'undefined') {
-        console.error('❌ Socket.io not loaded!');
-        showAlert('Failed to load Socket.io. Please refresh.', 'error');
-        return;
-    }
-    
-    await fetchInitialSettings();
-    initializeSocket();
-    setupEventListeners();
-    createSnowfall();
-    drawSnowman();
-    
-    console.log('✅ Cold Room Initialized');
-});
-
-async function fetchInitialSettings() {
-    try {
-        const res = await fetch('/settings');
-        if (res.ok) {
-            systemSettings = await res.json();
-            applySiteSettings();
-            updateMusicPlayers();
-        }
-    } catch (e) {
-        console.log('Settings fetch skipped');
-    }
-}
-
-function initializeSocket() {
-    try {
-        socket = io({
-            transports: ['websocket', 'polling'],
-            reconnection: true,
-            reconnectionDelay: 1000,
-            reconnectionAttempts: Infinity,
-            timeout: 20000
-        });
+    function drawSpiral() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
         
-        setupSocketListeners();
-        console.log('✅ Socket initialized');
-    } catch (e) {
-        console.error('Socket init failed:', e);
-        showAlert('Connection failed', 'error');
-    }
-}
-
-function setupSocketListeners() {
-    if (!socket) return;
-    
-    socket.on('connect', () => {
-        console.log('✅ Connected');
-        isReconnecting = false;
-        hideLoading();
-        if (currentUser && currentRoom) {
-            socket.emit('join-room', { roomId: currentRoom });
-            showNotification('✅ Reconnected');
-        }
-    });
-
-    socket.on('disconnect', () => {
-        if (!isReconnecting) {
-            showNotification('⚠️ Reconnecting...');
-            isReconnecting = true;
-        }
-    });
-
-    socket.on('reconnect', () => {
-        isReconnecting = false;
-        if (currentUser && currentRoom) {
-            socket.emit('join-room', { roomId: currentRoom });
-        }
-    });
-
-    socket.on('login-success', handleLoginSuccess);
-    socket.on('login-error', (msg) => { hideLoading(); showAlert(msg || 'Login failed', 'error'); });
-    socket.on('banned-user', (data) => {
-        hideLoading();
-        showAlert('Banned: ' + data.reason, 'error');
-        document.getElementById('support-section').style.display = 'block';
-    });
-    socket.on('register-success', (data) => {
-        hideLoading();
-        showAlert(data.message || 'Account created!', 'success');
-        document.getElementById('login-username').value = data.username || '';
-    });
-    socket.on('register-error', (msg) => { hideLoading(); showAlert(msg || 'Registration failed', 'error'); });
-
-    socket.on('new-message', (msg) => {
-        if (msg.roomId === currentRoom) { 
-            addMessage(msg); 
-            scrollToBottom(); 
-        }
-    });
-    
-    socket.on('message-edited', (data) => {
-        const el = document.querySelector('[data-message-id="' + data.messageId + '"] .message-text');
-        if (el) el.innerHTML = esc(data.newText) + ' <small>(edited)</small>';
-    });
-
-    socket.on('new-private-message', (msg) => {
-        if (blockedUsers.has(msg.from)) return;
-        if (currentPrivateChatUser === msg.from) {
-            addPrivateMessage(msg);
-        }
-        showNotification('💬 ' + msg.fromName);
-    });
-    
-    socket.on('private-message-sent', addPrivateMessage);
-    socket.on('private-messages-list', (d) => displayPrivateMessages(d.messages, d.withUserId));
-
-    socket.on('room-joined', handleRoomJoined);
-    socket.on('room-created', (d) => {
-        showAlert('Room created!', 'success');
-        socket.emit('join-room', { roomId: d.roomId });
-        hideModal('create-room-modal');
-    });
-    socket.on('room-updated', (d) => {
-        document.getElementById('room-info').textContent = d.name;
-        showNotification('Room updated');
-    });
-
-    socket.on('users-list', updateUsersList);
-    socket.on('rooms-list', updateRoomsList);
-    socket.on('user-joined', (d) => showNotification(d.username + ' joined'));
-
-    socket.on('message-deleted', (d) => {
-        const el = document.querySelector('[data-message-id="' + d.messageId + '"]');
-        if (el) el.remove();
-    });
-    
-    socket.on('chat-cleaned', (d) => { clearMessages(); showAlert(d.message, 'info'); });
-    
-    socket.on('room-silenced', (d) => {
-        const disabled = d.forceDisable !== undefined ? d.forceDisable : true;
-        document.getElementById('message-input').disabled = disabled && !currentUser?.isOwner;
-        document.querySelector('#message-form button').disabled = disabled && !currentUser?.isOwner;
-        showAlert(d.message, 'warning');
-    });
-    
-    socket.on('room-unsilenced', (d) => {
-        document.getElementById('message-input').disabled = false;
-        document.querySelector('#message-form button').disabled = false;
-        showAlert(d.message, 'success');
-    });
-    
-    socket.on('room-deleted', (d) => {
-        showAlert(d.message, 'error');
-        socket.emit('join-room', { roomId: 'global_cold' });
-    });
-
-    socket.on('party-mode-changed', (d) => {
-        if (d.roomId === currentRoom) {
-            togglePartyEffects(d.enabled);
-            showNotification(d.enabled ? '🎉 Party ON!' : 'Party OFF');
-        }
-    });
-
-    socket.on('room-media-updated', (d) => {
-        if (d.roomId === currentRoom) {
-            handleRoomMediaUpdate(d);
-        }
-    });
-
-    socket.on('profile-updated', (d) => {
-        if (d.userId === currentUser?.id) {
-            currentUser.profilePicture = d.profilePicture;
-            updateCurrentUserAvatar();
-        }
-        showAlert(d.message, 'success');
-    });
-
-    socket.on('action-success', (msg) => showAlert(msg, 'success'));
-    socket.on('error', (msg) => showAlert(msg || 'Error', 'error'));
-    
-    socket.on('banned', (d) => {
-        showAlert('Banned: ' + d.reason, 'error');
-        setTimeout(() => logout(true), 3000);
-    });
-    
-    socket.on('account-deleted', (d) => {
-        showAlert(d.message, 'error');
-        setTimeout(() => logout(true), 2000);
-    });
-
-    socket.on('settings-updated', (s) => {
-        systemSettings = s;
-        applySiteSettings();
-        updateMusicPlayers();
-        showAlert('Settings updated', 'info');
-    });
-
-    socket.on('support-message-sent', (d) => showAlert(d.message, 'success'));
-    socket.on('support-messages-list', displaySupportMessages);
-    socket.on('muted-list', displayMutedList);
-    socket.on('banned-list', displayBannedList);
-    socket.on('blocked-users', (list) => {
-        blockedUsers = new Set(list);
-    });
-    socket.on('room-media-data', (data) => {
-        document.getElementById('room-video-url').value = data.videoUrl || '';
-        document.getElementById('room-music-url').value = data.musicUrl || '';
-        document.getElementById('room-music-volume').value = data.musicVolume || 0.5;
-    });
-}
-
-function setupEventListeners() {
-    const messageForm = document.getElementById('message-form');
-    if (messageForm) {
-        messageForm.addEventListener('submit', function(e) {
-            e.preventDefault();
-            sendMessage();
-        });
-    }
-
-    const messageInput = document.getElementById('message-input');
-    if (messageInput) {
-        messageInput.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-            }
-        });
-    }
-
-    const privateInput = document.getElementById('private-message-input');
-    if (privateInput) {
-        privateInput.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendPrivateMessage();
-            }
-        });
-    }
-
-    const loginPassword = document.getElementById('login-password');
-    if (loginPassword) {
-        loginPassword.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') login();
-        });
-    }
-    
-    const registerPassword = document.getElementById('register-password');
-    if (registerPassword) {
-        registerPassword.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') register();
-        });
-    }
-}
-
-window.login = function() {
-    if (!socket || !socket.connected) {
-        showAlert('Connecting...', 'warning');
-        setTimeout(login, 1000);
-        return;
-    }
-    
-    const username = document.getElementById('login-username').value.trim();
-    const password = document.getElementById('login-password').value.trim();
-    
-    if (!username || !password) {
-        return showAlert('Enter username and password', 'error');
-    }
-    
-    showLoading('Logging in...');
-    socket.emit('login', { username: username, password: password });
-};
-
-window.register = function() {
-    if (!socket || !socket.connected) {
-        showAlert('Connecting...', 'warning');
-        setTimeout(register, 1000);
-        return;
-    }
-    
-    const username = document.getElementById('register-username').value.trim();
-    const password = document.getElementById('register-password').value.trim();
-    const displayName = document.getElementById('register-displayname').value.trim();
-    const gender = document.getElementById('register-gender').value;
-
-    if (!username || !password || !displayName || !gender) {
-        return showAlert('Fill all fields', 'error');
-    }
-    
-    if (username.length < 3 || username.length > 20) {
-        return showAlert('Username: 3-20 characters', 'error');
-    }
-    
-    if (password.length < 6) {
-        return showAlert('Password: 6+ characters', 'error');
-    }
-    
-    if (displayName.length < 3 || displayName.length > 30) {
-        return showAlert('Display name: 3-30 characters', 'error');
-    }
-
-    showLoading('Creating account...');
-    socket.emit('register', { username: username, password: password, displayName: displayName, gender: gender });
-};
-
-window.sendSupportMessage = function() {
-    const message = document.getElementById('support-message').value.trim();
-    if (!message) return showAlert('Write your message', 'error');
-    
-    if (!socket || !socket.connected) {
-        return showAlert('Not connected', 'error');
-    }
-    
-    socket.emit('send-support-message', {
-        from: document.getElementById('login-username').value || 'Anonymous',
-        message: message
-    });
-    document.getElementById('support-message').value = '';
-};
-
-window.logout = function(forced) {
-    if (forced || confirm('Logout?')) {
-        showLoading('Logging out...');
-        if (socket) socket.disconnect();
-        setTimeout(() => location.reload(), 1000);
-    }
-};
-
-function handleLoginSuccess(data) {
-    try {
-        currentUser = data.user;
-        currentUser.isModerator = data.room.moderators?.includes(currentUser.id) || false;
-        currentRoom = data.room.id;
-        systemSettings = data.systemSettings;
-        blockedUsers = new Set(data.blockedUsers || []);
-
-        document.getElementById('current-user-name').textContent = currentUser.displayName;
-        updateCurrentUserAvatar();
-        updateUserBadges();
-
-        document.getElementById('login-screen').classList.remove('active');
-        document.getElementById('chat-screen').classList.add('active');
-
-        stopLoginMusic();
-        handleRoomMusic(data.room);
-        hideLoading();
-        showAlert('Welcome ' + currentUser.displayName + '! ❄️', 'success');
-
-        clearMessages();
-        data.room.messages.forEach(addMessage);
-
-        document.getElementById('message-input').disabled = false;
-        document.querySelector('#message-form button').disabled = false;
-
-        socket.emit('get-rooms');
-        socket.emit('get-users', { roomId: currentRoom });
-
-        if (currentUser.isOwner) {
-            document.getElementById('owner-panel-btn').style.display = 'inline-block';
-            document.getElementById('owner-tools').style.display = 'flex';
-        } else if (currentUser.isModerator) {
-            document.getElementById('moderator-panel-btn').style.display = 'inline-block';
-        }
-
-        if (data.room.partyMode) togglePartyEffects(true);
-
-        applySiteSettings();
-        startHeartbeat();
-
-        if (data.room.videoUrl) {
-            showRoomVideo(data.room.videoUrl);
-        }
-    } catch (e) {
-        console.error('Login success error:', e);
-    }
-}
-
-function handleRoomJoined(data) {
-    currentRoom = data.room.id;
-    document.getElementById('room-info').textContent = data.room.name;
-    
-    clearMessages();
-    data.room.messages.forEach(addMessage);
-    
-    document.getElementById('message-input').disabled = false;
-    document.querySelector('#message-form button').disabled = false;
-    
-    togglePartyEffects(data.room.partyMode || false);
-    socket.emit('get-users', { roomId: currentRoom });
-    scrollToBottom();
-
-    handleRoomMusic(data.room);
-
-    if (data.room.videoUrl) {
-        showRoomVideo(data.room.videoUrl);
-    } else {
-        hideRoomVideo();
-    }
-}
-
-window.showProfileSettings = function() {
-    document.getElementById('profile-settings-modal').classList.add('active');
-    
-    const previewImg = document.getElementById('profile-preview-img');
-    const previewEmoji = document.getElementById('profile-preview-emoji');
-    
-    if (currentUser.profilePicture) {
-        previewImg.src = currentUser.profilePicture;
-        previewImg.style.display = 'block';
-        previewEmoji.style.display = 'none';
-    } else {
-        previewImg.style.display = 'none';
-        previewEmoji.style.display = 'block';
-        previewEmoji.textContent = currentUser.avatar;
-    }
-    
-    document.getElementById('profile-preview-name').textContent = currentUser.displayName;
-    document.getElementById('profile-picture-url').value = currentUser.profilePicture || '';
-};
-
-window.updateProfilePicture = function() {
-    const url = document.getElementById('profile-picture-url').value.trim();
-    if (!url) return showAlert('Enter image URL', 'error');
-    
-    socket.emit('update-profile-picture', { profilePicture: url });
-    hideModal('profile-settings-modal');
-};
-
-window.removeProfilePicture = function() {
-    socket.emit('update-profile-picture', { profilePicture: null });
-    hideModal('profile-settings-modal');
-};
-
-window.changeName = function() {
-    const newName = prompt('New display name:', currentUser.displayName);
-    if (newName && newName.trim() && newName.trim() !== currentUser.displayName) {
-        socket.emit('change-display-name', { newName: newName.trim() });
-    }
-};
-
-function updateCurrentUserAvatar() {
-    const avatarImg = document.getElementById('current-user-avatar-img');
-    const avatarEmoji = document.getElementById('current-user-avatar');
-    
-    if (currentUser.profilePicture) {
-        avatarImg.src = currentUser.profilePicture;
-        avatarImg.style.display = 'block';
-        avatarEmoji.style.display = 'none';
-    } else {
-        avatarImg.style.display = 'none';
-        avatarEmoji.style.display = 'block';
-        avatarEmoji.textContent = currentUser.avatar;
-    }
-}
-
-function updateUserBadges() {
-    const container = document.getElementById('user-badges');
-    if (!container) return;
-    let badges = '';
-    if (currentUser.isOwner) badges += '<span class="badge owner-badge">👑 Owner</span>';
-    container.innerHTML = badges;
-}
-
-function sendMessage() {
-    const textarea = document.getElementById('message-input');
-    const text = textarea.value.trim();
-    if (!text) return;
-    if (!socket || !socket.connected) return showAlert('Reconnecting...', 'warning');
-    
-    const payload = {
-        text: text,
-        roomId: currentRoom
-    };
-    
-    if (replyToMessage) {
-        payload.replyTo = replyToMessage;
-        cancelReply();
-    }
-    
-    socket.emit('send-message', payload);
-    textarea.value = '';
-}
-
-function addMessage(message) {
-    const container = document.getElementById('messages');
-    if (!container) return;
-
-    const welcomeMsg = container.querySelector('.welcome-message');
-    if (welcomeMsg) welcomeMsg.remove();
-
-    const messageDiv = document.createElement('div');
-    const isMyMessage = message.userId === currentUser?.id;
-    messageDiv.className = 'message ' + (message.isOwner ? 'owner-message ' : '') + (isMyMessage ? 'my-message' : '');
-    messageDiv.setAttribute('data-message-id', message.id);
-
-    let badges = '';
-    if (message.isOwner) badges += '<span class="badge owner-badge">👑</span>';
-    else if (message.isModerator) badges += '<span class="badge moderator-badge">⭐</span>';
-
-    let avatarHTML = '';
-    if (message.profilePicture) {
-        avatarHTML = '<img src="' + esc(message.profilePicture) + '" alt="avatar" class="message-profile-pic">';
-    } else {
-        avatarHTML = '<span class="message-avatar-emoji">' + esc(message.avatar) + '</span>';
-    }
-
-    let messageHTML = '';
-    
-    if (message.isVideo) {
-        messageHTML = '<div class="message-container"><div class="message-avatar">' + avatarHTML + '</div><div class="message-content"><div class="message-header"><span class="message-user">' + esc(message.username) + badges + '</span></div><div class="message-video"><video controls style="max-width: 100%; border-radius: 10px;"><source src="' + esc(message.videoUrl) + '" type="video/mp4"></video></div><div class="message-footer"><span class="message-time">' + message.timestamp + '</span></div></div></div>';
-    } else if (message.isImage) {
-        messageHTML = '<div class="message-container"><div class="message-avatar">' + avatarHTML + '</div><div class="message-content"><div class="message-header"><span class="message-user">' + esc(message.username) + badges + '</span></div><div class="message-image"><img src="' + esc(message.imageUrl) + '" alt="Image" style="max-width: 100%; border-radius: 10px;"></div><div class="message-footer"><span class="message-time">' + message.timestamp + '</span></div></div></div>';
-    } else {
-        let replyHTML = '';
-        if (message.replyTo) {
-            replyHTML = '<div class="message-reply-preview"><div class="reply-indicator"></div><div class="reply-content"><div class="reply-user">↩️ ' + esc(message.replyTo.username) + '</div><div class="reply-text">' + esc(message.replyTo.text).substring(0, 50) + (message.replyTo.text.length > 50 ? '...' : '') + '</div></div></div>';
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        const maxRadius = Math.min(canvas.width, canvas.height) * 0.4;
+        
+        ctx.save();
+        ctx.translate(centerX, centerY);
+        ctx.rotate(rotation);
+        
+        const isBlackTheme = document.body.classList.contains('black-theme');
+        const color1 = isBlackTheme ? '#666666' : '#4a90e2';
+        const color2 = isBlackTheme ? '#333333' : '#1e3a8a';
+        
+        for (let i = 0; i < 8; i++) {
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.arc(0, 0, maxRadius, 
+                (i * Math.PI / 4), 
+                ((i + 1) * Math.PI / 4));
+            ctx.closePath();
+            ctx.fillStyle = i % 2 === 0 ? color1 : color2;
+            ctx.globalAlpha = 0.1;
+            ctx.fill();
         }
         
-        messageHTML = '<div class="message-container"><div class="message-avatar">' + avatarHTML + '</div><div class="message-content"><div class="message-header"><span class="message-user">' + esc(message.username) + badges + '</span></div>' + replyHTML + '<div class="message-text">' + esc(message.text) + (message.edited ? ' <small>(edited)</small>' : '') + '</div><div class="message-footer"><span class="message-time">' + message.timestamp + '</span></div></div></div>';
+        ctx.restore();
+        
+        rotation += 0.005;
+        requestAnimationFrame(drawSpiral);
     }
-
-    messageDiv.innerHTML = messageHTML;
-
-    messageDiv.style.cursor = 'pointer';
-    messageDiv.addEventListener('click', (e) => {
-        if (!e.target.closest('.badge') && !e.target.closest('video') && !e.target.closest('img')) {
-            selectedUserId = message.userId;
-            selectedUsername = message.username;
-            showMessageActions(message);
-        }
-    });
-
-    container.appendChild(messageDiv);
-    scrollToBottom();
-}
-
-function showMessageActions(message) {
-    const actions = [];
-
-    if (!message.isImage && !message.isVideo) {
-        actions.push({ 
-            text: '↩️ Reply', 
-            action: () => replyToMessageAction(message) 
-        });
-    }
-
-    if (!message.isImage && !message.isVideo && message.userId === currentUser?.id) {
-        actions.push({ 
-            text: '✏️ Edit', 
-            action: () => editMessage(message.id, message.text) 
-        });
-    }
-
-    actions.push({ text: '📝 Change My Name', action: changeName });
-    actions.push({ text: '🖼️ Profile Settings', action: showProfileSettings });
-
-    if (currentUser?.isOwner) {
-        if (message.userId !== currentUser.id) {
-            actions.push({ text: '👑 Add Moderator', action: addModerator });
-            actions.push({ text: '⭐ Remove Moderator', action: removeModerator });
-            actions.push({ text: '🔇 Mute User', action: showMuteDialog });
-            actions.push({ text: '🚫 Ban User', action: banUser });
-            actions.push({ text: '🗑️ Delete Account', action: deleteAccount });
-        }
-        actions.push({ text: '❌ Delete Message', action: () => deleteMessage(message.id) });
-    } else if (currentUser?.isModerator && message.userId !== currentUser.id) {
-        actions.push({ text: '🔇 Mute User', action: showMuteDialog });
-    }
-
-    if (message.userId !== currentUser?.id) {
-        actions.push({ text: '💬 Private Message', action: () => openPrivateChat(selectedUserId) });
-    }
-
-    actions.push({ text: '❌ Cancel', action: hideActionsMenu });
-    showActionsMenu(actions);
-}
-
-function replyToMessageAction(message) {
-    replyToMessage = {
-        id: message.id,
-        username: message.username,
-        text: message.text
-    };
     
-    const replyPreview = document.createElement('div');
-    replyPreview.id = 'reply-preview';
-    replyPreview.className = 'reply-preview-bar';
-    replyPreview.innerHTML = '<div class="reply-preview-content"><div class="reply-preview-label">Replying to ' + esc(message.username) + '</div><div class="reply-preview-text">' + esc(message.text).substring(0, 50) + (message.text.length > 50 ? '...' : '') + '</div></div><button class="reply-cancel-btn" onclick="cancelReply()">✕</button>';
-    
-    const existingPreview = document.getElementById('reply-preview');
-    if (existingPreview) existingPreview.remove();
-    
-    const chatTools = document.querySelector('.chat-tools');
-    chatTools.insertBefore(replyPreview, chatTools.firstChild);
-    
-    document.getElementById('message-input').focus();
+    drawSpiral();
 }
 
-window.cancelReply = function() {
-    replyToMessage = null;
-    const preview = document.getElementById('reply-preview');
-    if (preview) preview.remove();
-};
-
-function editMessage(messageId, currentText) {
-    const newText = prompt('Edit message:', currentText || '');
-    if (newText && newText.trim() && newText.trim() !== currentText) {
-        socket.emit('edit-message', { messageId: messageId, newText: newText.trim() });
-    }
-}
-
-function deleteMessage(messageId) {
-    socket.emit('delete-message', { messageId: messageId, roomId: currentRoom });
-}
-
-window.showMuteDialog = function() {
-    const duration = prompt('Mute ' + selectedUsername + ' for minutes? (0 = permanent):', '10');
-    if (duration === null) return;
-    const reason = prompt('Reason:', 'Rule violation');
-    if (!reason) return;
-    socket.emit('mute-user', {
-        userId: selectedUserId,
-        username: selectedUsername,
-        duration: parseInt(duration),
-        reason: reason,
-        roomId: currentRoom
-    });
-};
-
-window.banUser = function() {
-    if (!confirm('Ban ' + selectedUsername + '?')) return;
-    const reason = prompt('Reason:', 'Serious violation');
-    if (reason) socket.emit('ban-user', { userId: selectedUserId, username: selectedUsername, reason: reason });
-};
-
-window.deleteAccount = function() {
-    if (!confirm('⚠️ DELETE ' + selectedUsername + '? This CANNOT be undone!')) return;
-    socket.emit('delete-account', { userId: selectedUserId });
-};
-
-window.addModerator = function() {
-    if (!confirm('Add ' + selectedUsername + ' as moderator?')) return;
-    socket.emit('add-moderator', { userId: selectedUserId, username: selectedUsername, roomId: currentRoom });
-};
-
-window.removeModerator = function() {
-    if (!confirm('Remove ' + selectedUsername + ' from moderators?')) return;
-    socket.emit('remove-moderator', { userId: selectedUserId, username: selectedUsername, roomId: currentRoom });
-};
-
-function showActionsMenu(actions) {
-    const menu = document.getElementById('message-actions-menu');
-    const list = document.getElementById('message-actions-list');
-    list.innerHTML = '';
-    
-    actions.forEach(action => {
-        const btn = document.createElement('button');
-        btn.className = 'action-menu-btn';
-        btn.textContent = action.text;
-        btn.onclick = (e) => { 
-            e.stopPropagation();
-            hideActionsMenu(); 
-            action.action(); 
-        };
-        list.appendChild(btn);
-    });
-
-    menu.style.display = 'flex';
-}
-
-function hideActionsMenu() {
-    document.getElementById('message-actions-menu').style.display = 'none';
-}
-
-window.showImageUpload = () => document.getElementById('image-upload-modal').classList.add('active');
-window.sendImageMessage = function() {
-    const url = document.getElementById('image-url-input').value.trim();
-    if (!url) return showAlert('Enter image URL', 'error');
-    socket.emit('send-image', { imageUrl: url });
-    document.getElementById('image-url-input').value = '';
-    hideModal('image-upload-modal');
-};
-
-window.showVideoUpload = () => document.getElementById('video-upload-modal').classList.add('active');
-window.sendVideoMessage = function() {
-    const url = document.getElementById('video-url-input').value.trim();
-    if (!url) return showAlert('Enter video URL', 'error');
-    if (!url.toLowerCase().endsWith('.mp4')) return showAlert('MP4 only', 'error');
-    socket.emit('send-video', { videoUrl: url });
-    document.getElementById('video-url-input').value = '';
-    hideModal('video-upload-modal');
-};
-
-window.showPrivateMessages = function() {
-    document.getElementById('private-messages-modal').classList.add('active');
-    loadPrivateUsersList();
-};
-
-function loadPrivateUsersList() {
-    const container = document.getElementById('private-users-list');
-    container.innerHTML = '';
-    socket.emit('get-users', { roomId: currentRoom });
-    socket.once('users-list', (users) => {
-        users.forEach(user => {
-            if (user.id === currentUser?.id) return;
-            const div = document.createElement('div');
-            div.className = 'private-user-item' + (blockedUsers.has(user.id) ? ' blocked' : '');
-            div.dataset.userId = user.id;
-            div.dataset.userName = user.displayName;
-            
-            let avatarHTML = '';
-            if (user.profilePicture) {
-                avatarHTML = '<div class="user-avatar"><img src="' + esc(user.profilePicture) + '"></div>';
-            } else {
-                avatarHTML = '<div class="user-avatar"><span>' + esc(user.avatar) + '</span></div>';
-            }
-            
-            div.innerHTML = avatarHTML + '<span>' + esc(user.displayName) + '</span>';
-            div.onclick = () => openPrivateChat(user.id);
-            container.appendChild(div);
-        });
-    });
-}
-
-function openPrivateChat(userId) {
-    if (blockedUsers.has(userId)) {
-        showAlert('You have blocked this user', 'error');
-        return;
-    }
-    currentPrivateChatUser = userId;
-    socket.emit('get-private-messages', { withUserId: userId });
-    document.getElementById('private-messages-modal').classList.add('active');
-    
-    const user = Array.from(document.querySelectorAll('.user-item'))
-        .find(el => el.dataset.userId === userId);
-    if (user) {
-        document.getElementById('private-chat-name').textContent = user.dataset.userName;
-        document.getElementById('block-user-btn').style.display = 'inline-block';
-    }
-}
-
-window.sen
+console.log('✅ Cold Room V3.0 - Script Loaded Successfully');
